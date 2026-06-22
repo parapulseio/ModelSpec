@@ -39,21 +39,24 @@ queryable, evolvable, and lossless**.
 
 ## Project status
 
-**M1 (MVP) is complete.** See [docs/roadmap.md](docs/roadmap.md).
+**M1 (MVP) and M2 (multi-source + validation) are complete.** See [docs/roadmap.md](docs/roadmap.md).
 
 | Capability | Status |
 | --- | --- |
-| `ModelSpec` schema skeleton (8 sub-models + provenance) | ✅ |
-| `config.json` extractor (alias normalization, feature inference) | ✅ |
-| safetensors extractor (header-only, sharded aggregation, param count) | ✅ |
-| Pipeline: orchestrator + merger + reshape | ✅ |
-| Metadata-only HF fetch (Range-request headers, no weights) | ✅ |
-| CLI `extract` / `schema` (JSON / YAML output) | ✅ |
-| GGUF / license / tokenizer extractors | ⏳ M2 |
+| `ModelSpec` schema skeleton (8 sub-models + provenance) | ✅ M1 |
+| `config.json` extractor (alias normalization, feature inference) | ✅ M1 |
+| safetensors extractor (header-only, sharded aggregation, param count) | ✅ M1 |
+| Pipeline: orchestrator + merger + reshape | ✅ M1 |
+| Metadata-only HF fetch (Range-request headers, no weights) | ✅ M1 |
+| CLI `extract` / `schema` (JSON / YAML output) | ✅ M1 |
+| GGUF extractor (KV + tensor infos, no weights) | ✅ M2 |
+| License extractor (fingerprint + keyword tiers) | ✅ M2 |
+| Tokenizer extractor (type / vocab / chat template) | ✅ M2 |
+| Cross-validation (param double-path, context, MoE signals) | ✅ M2 |
 | Quantization / merge / adapter extraction | ⏳ M3 |
 
-In M1, `quantization` / `merge` / `adapter` are reserved fields and are always
-`null`.
+`quantization` / `merge` / `adapter` are reserved fields and are always `null`
+until M3.
 
 ## Install
 
@@ -62,14 +65,15 @@ Requires Python ≥ 3.10.
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
-pip install -e ".[dev]"        # package + pytest + PyYAML
-# optional: pip install -e ".[all]"   # also installs gguf / yaml (used from M2)
+pip install -e ".[dev]"        # package + pytest + PyYAML + gguf
+# optional: pip install -e ".[all]"   # runtime extras: gguf / yaml
 ```
 
-## Usage (M1)
+## Usage
 
 ```bash
-# Extract from a local model directory (offline, no network)
+# Extract from a local model directory (offline, no network).
+# Works for HF (config + safetensors) and GGUF directories alike.
 modelspec extract /path/to/model/dir --offline
 
 # Extract from a HF repo (downloads metadata only — a few MB, never the weights)
