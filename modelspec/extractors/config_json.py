@@ -87,6 +87,45 @@ def _covered_keys() -> set[str]:
     return keys
 
 
+def _extract_quantization(raw: dict) -> list[FieldClaim]:
+    """Emit quantization claims from config.json ``quantization_config``.
+
+    M3 recognizes AWQ and GPTQ; an unknown quant_method emits nothing (the field
+    stays None and the discriminated union never sees an unknown discriminator),
+    while the original quantization_config is still archived via passthrough/raw.
+    """
+    qc = raw.get("quantization_config")
+    if not isinstance(qc, dict):
+        return []
+    method = str(qc.get("quant_method", "")).lower()
+    claims: list[FieldClaim] = []
+    if method == "awq":
+        claims.append(FieldClaim("quantization.format", "awq", "config", "high"))
+        if "bits" in qc:
+            claims.append(FieldClaim("quantization.bits", qc["bits"], "config", "high"))
+        if "group_size" in qc:
+            claims.append(
+                FieldClaim("quantization.group_size", qc["group_size"], "config", "high")
+            )
+        if "zero_point" in qc:
+            claims.append(
+                FieldClaim("quantization.zero_point", qc["zero_point"], "config", "high")
+            )
+    elif method == "gptq":
+        claims.append(FieldClaim("quantization.format", "gptq", "config", "high"))
+        if "bits" in qc:
+            claims.append(FieldClaim("quantization.bits", qc["bits"], "config", "high"))
+        if "group_size" in qc:
+            claims.append(
+                FieldClaim("quantization.group_size", qc["group_size"], "config", "high")
+            )
+        if "desc_act" in qc:
+            claims.append(
+                FieldClaim("quantization.desc_act", qc["desc_act"], "config", "high")
+            )
+    return claims
+
+
 class ConfigJsonExtractor:
     name = "config_json"
 
@@ -162,6 +201,9 @@ class ConfigJsonExtractor:
             claims.append(
                 FieldClaim("architecture.tied_embeddings", True, "config", "medium")
             )
+
+        # Quantization (AWQ / GPTQ branch of the discriminated union).
+        claims.extend(_extract_quantization(raw))
 
         claims.append(FieldClaim("architecture.tags", tags, "inferred", "medium"))
 

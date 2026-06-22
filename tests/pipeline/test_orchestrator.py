@@ -57,6 +57,41 @@ def test_offline_rejects_nonexistent(tmp_path: Path):
         extract("meta-llama/Llama-3.1-8B", offline=True)
 
 
+def test_merged_quantized_model_end_to_end(tmp_path: Path):
+    # A merge (mergekit_config.yml) + AWQ quantization (config.json) — the two
+    # orthogonal structures must coexist on one spec.
+    write_config(
+        tmp_path / "config.json",
+        {
+            "architectures": ["LlamaForCausalLM"],
+            "num_hidden_layers": 2,
+            "num_attention_heads": 4,
+            "num_key_value_heads": 4,
+            "quantization_config": {"quant_method": "awq", "bits": 4, "group_size": 128},
+        },
+    )
+    write_safetensors_header(
+        tmp_path / "model.safetensors",
+        {"model.embed_tokens.weight": {"dtype": "BF16", "shape": [32, 16]}},
+    )
+    (tmp_path / "mergekit_config.yml").write_text(
+        "merge_method: dare-ties\nmodels:\n  - model: org/a\n  - model: org/b\n"
+    )
+    spec = extract(str(tmp_path), offline=True)
+
+    # quantization branch
+    assert spec.quantization is not None
+    assert spec.quantization.format == "awq"
+    assert spec.quantization.bits == 4
+    # merge branch (orthogonal, coexists)
+    assert spec.merge is not None
+    assert spec.merge.method == "dare_ties"  # alias-normalized
+    assert {c.model_id for c in spec.merge.components} == {"org/a", "org/b"}
+    # lineage chain
+    assert spec.identity.lineage is not None
+    assert spec.identity.lineage.relation == "merge"
+
+
 def test_local_gguf_model_end_to_end(tmp_path: Path):
     import pytest
 

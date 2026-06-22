@@ -32,8 +32,11 @@ _SMALL_FILES = {
     "tokenizer.json",
     "adapter_config.json",
     "generation_config.json",
-    # README.md carries the model-card front-matter (auxiliary license evidence).
+    # README.md carries the model-card front-matter (license + merge evidence).
     "README.md",
+    # mergekit recipe — the highest-confidence merge signal.
+    "mergekit_config.yml",
+    "mergekit_config.yaml",
 }
 # License file names — note it is NOT just LICENSE* (see AGENTS.md).
 _LICENSE_NAMES = {

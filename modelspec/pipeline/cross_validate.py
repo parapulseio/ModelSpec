@@ -87,3 +87,16 @@ def cross_validate(spec: "ModelSpec") -> None:
             f"MoE signal disagreement: config/expert_count={has_moe_field}, "
             f"tensor-pattern={has_moe_tag}"
         )
+
+    # --- 4. merge architecture consistency ---
+    # All merge components should share the architecture family. We can only
+    # compare the recipe's declared base_architecture against the resolved
+    # family here (component archs aren't fetched); a mismatch usually means a
+    # frankenmerge/passthrough or a wrong detection.
+    if spec.merge is not None:
+        base_arch = spec.merge.base_architecture
+        family = spec.architecture.family
+        if base_arch and family and base_arch != family:
+            warnings.append(
+                f"merge base_architecture ({base_arch}) != resolved family ({family})"
+            )

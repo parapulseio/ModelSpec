@@ -42,12 +42,15 @@ def write_gguf(
     """Write a tiny but valid GGUF file using the official gguf writer.
 
     ``kv`` maps GGUF keys to values (typed below); ``tensors`` maps tensor name
-    -> (shape, ggml_type_name). Zero-filled tensor data is written so the file
-    is fully valid. Skips automatically if gguf is not installed (caller should
-    ``importorskip``).
+    -> (shape, ggml_type_name). Full-precision types (F32/F16) write a real
+    array; quantized types (e.g. "Q4_K") write correctly-sized zero blocks so
+    the file is valid. Skips automatically if gguf is not installed (caller
+    should ``importorskip``).
     """
     import numpy as np
     from gguf import GGUFWriter, GGMLQuantizationType
+    from gguf.constants import GGML_QUANT_SIZES
+    from math import prod
 
     arch = kv.get("general.architecture", "llama")
     writer = GGUFWriter(str(path), arch)
@@ -65,9 +68,21 @@ def write_gguf(
         elif isinstance(value, list):  # array of strings (e.g. tokenizer tokens)
             writer.add_array(key, value)
 
-    for name, (shape, _ggml_type) in tensors.items():
-        data = np.zeros(shape, dtype=np.float32)
-        writer.add_tensor(name, data, raw_dtype=GGMLQuantizationType.F32)
+    for name, (shape, ggml_type_name) in tensors.items():
+        ggml_type = GGMLQuantizationType[ggml_type_name]
+        if ggml_type_name in ("F32", "F16"):
+            dt = np.float32 if ggml_type_name == "F32" else np.float16
+            writer.add_tensor(name, np.zeros(shape, dtype=dt), raw_dtype=ggml_type)
+        else:
+            # Quantized: the writer takes the *byte* shape and derives the
+            # logical shape. Last logical dim must be a multiple of block_size.
+            block_elems, block_bytes = GGML_QUANT_SIZES[ggml_type]
+            *lead, last = shape
+            if last % block_elems != 0:
+                raise ValueError(f"{last} not a multiple of block size {block_elems}")
+            byte_shape = [*lead, last // block_elems * block_bytes]
+            data = np.zeros(byte_shape, dtype=np.uint8)
+            writer.add_tensor(name, data, raw_shape=byte_shape, raw_dtype=ggml_type)
 
     writer.write_header_to_file()
     writer.write_kv_data_to_file()
