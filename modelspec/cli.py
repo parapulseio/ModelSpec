@@ -7,7 +7,9 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
+from pathlib import Path
 from typing import Any
 
 from modelspec import __version__
@@ -72,6 +74,95 @@ def _cmd_schema(args: argparse.Namespace) -> int:
     return 0
 
 
+def _progress_printer(done: int, total: int) -> None:
+    print(f"\r  extracting {done}/{total} ...", end="", file=sys.stderr, flush=True)
+    if done == total:
+        print("", file=sys.stderr)
+
+
+def _run_batch_from_args(args: argparse.Namespace):
+    """Shared batch driver for the batch / coverage subcommands."""
+    from modelspec.analytics import read_targets, run_batch
+
+    try:
+        targets = read_targets(args.targets)
+    except OSError as e:
+        print(f"error: cannot read targets: {e}", file=sys.stderr)
+        return None
+    progress = None if args.quiet else _progress_printer
+    return run_batch(
+        targets,
+        offline=args.offline,
+        revision=args.revision,
+        max_workers=args.workers,
+        limit=args.limit,
+        on_progress=progress,
+    )
+
+
+def _cmd_batch(args: argparse.Namespace) -> int:
+    from modelspec.analytics import build_coverage_report
+
+    result = _run_batch_from_args(args)
+    if result is None:
+        return 2
+
+    # Optionally persist each spec as JSON (filename = sanitized target).
+    if args.output_dir:
+        out_dir = Path(args.output_dir)
+        out_dir.mkdir(parents=True, exist_ok=True)
+        for item in result.items:
+            if item.spec is None:
+                continue
+            name = re.sub(r"[^\w.-]", "__", item.target).strip("_") or "model"
+            (out_dir / f"{name}.json").write_text(
+                item.spec.model_dump_json(indent=2), encoding="utf-8"
+            )
+
+    report = build_coverage_report(result, top_n=args.top)
+    if args.format == "json":
+        print(json.dumps(report.to_dict(), indent=2, ensure_ascii=False))
+    else:
+        # batch focuses on extraction + the unknown_fields signal.
+        print(report.render(full=False, top_n=args.top))
+    return _exit_code(result)
+
+
+def _cmd_coverage(args: argparse.Namespace) -> int:
+    from modelspec.analytics import build_coverage_report
+
+    result = _run_batch_from_args(args)
+    if result is None:
+        return 2
+
+    report = build_coverage_report(result, top_n=args.top)
+    if args.format == "json":
+        print(json.dumps(report.to_dict(), indent=2, ensure_ascii=False))
+    else:
+        print(report.render(full=True, top_n=args.top))
+    return _exit_code(result)
+
+
+def _exit_code(result) -> int:
+    # Partial failures are expected at corpus scale and are reported as data, so
+    # they do not fail the command. Only a total wipeout (nothing extracted) is
+    # treated as an error.
+    if result.total > 0 and result.succeeded == 0:
+        return 1
+    return 0
+
+
+def _add_batch_options(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("targets", help="file of repo ids / paths (one per line; '-' for stdin)")
+    parser.add_argument("--offline", action="store_true", help="local paths only, no network")
+    parser.add_argument("--revision", help="commit / branch / tag")
+    parser.add_argument("--workers", type=int, default=8, help="concurrent extractions")
+    parser.add_argument("--limit", type=int, help="only process the first N targets (sampling)")
+    parser.add_argument("--format", choices=["text", "json"], default="text")
+    parser.add_argument("--top", type=int, default=20, help="rows for unknown_fields tables")
+    parser.add_argument("--quiet", action="store_true", help="suppress the progress line")
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="modelspec",
@@ -96,6 +187,19 @@ def build_parser() -> argparse.ArgumentParser:
 
     p_schema = sub.add_parser("schema", help="print the ModelSpec JSON Schema")
     p_schema.set_defaults(func=_cmd_schema)
+
+    p_batch = sub.add_parser(
+        "batch", help="extract many models; report unknown_fields frequency"
+    )
+    _add_batch_options(p_batch)
+    p_batch.add_argument("--output-dir", help="write each extracted spec as JSON here")
+    p_batch.set_defaults(func=_cmd_batch)
+
+    p_coverage = sub.add_parser(
+        "coverage", help="extraction coverage sanity check over a corpus"
+    )
+    _add_batch_options(p_coverage)
+    p_coverage.set_defaults(func=_cmd_coverage)
 
     return parser
 

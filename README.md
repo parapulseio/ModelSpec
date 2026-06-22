@@ -39,7 +39,7 @@ queryable, evolvable, and lossless**.
 
 ## Project status
 
-**M1–M3 are complete.** See [docs/roadmap.md](docs/roadmap.md).
+**M1–M4 are complete** (all roadmap milestones). See [docs/roadmap.md](docs/roadmap.md).
 
 | Capability | Status |
 | --- | --- |
@@ -55,6 +55,7 @@ queryable, evolvable, and lossless**.
 | Cross-validation (param double-path, context, MoE signals) | ✅ M2 |
 | Quantization discriminated union (GGUF / AWQ / GPTQ) | ✅ M3 |
 | Merge detection (5 signals) + recipe/components + lineage | ✅ M3 |
+| Batch extraction + coverage dashboard (`batch` / `coverage`) | ✅ M4 |
 | BnB / FP8 / MLX quantization, adapter extraction | ⏳ later |
 
 `adapter` is a reserved field and is always `null` for now.
@@ -88,6 +89,10 @@ modelspec extract ./model --offline --show-provenance
 
 # Export the JSON Schema of ModelSpec
 modelspec schema
+
+# Batch extraction + coverage dashboard over a list of models (M4)
+modelspec batch repos.txt --offline --output-dir specs/
+modelspec coverage repos.txt --offline   # canonical fill rates + unknown_fields
 ```
 
 ### Options (`extract`)
@@ -164,6 +169,7 @@ docs/                       # design docs
 - [docs/pipeline.md](docs/pipeline.md) — orchestration, merging, cross-validation
 - [docs/quantization-and-merge.md](docs/quantization-and-merge.md) — quantization & merge modeling
 - [docs/cli.md](docs/cli.md) — CLI reference
+- [docs/analytics.md](docs/analytics.md) — batch extraction, coverage, field promotion
 - [docs/development.md](docs/development.md) — setup, run, test, M1 code map
 - [docs/roadmap.md](docs/roadmap.md) — roadmap & milestones
 - [AGENTS.md](AGENTS.md) — conventions for AI coding agents
