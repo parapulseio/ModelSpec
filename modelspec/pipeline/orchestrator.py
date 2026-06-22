@@ -12,6 +12,7 @@ from typing import Any
 
 from modelspec.extractors import ALL_EXTRACTORS
 from modelspec.extractors.base import ExtractionSource, Extractor
+from modelspec.pipeline.cross_validate import cross_validate
 from modelspec.pipeline.merger import MergeResult, merge_claims
 from modelspec.schema import ModelSpec
 
@@ -48,6 +49,7 @@ def reshape(
     repo_id: str | None,
     source_format: str,
     raw_config: dict | None,
+    raw_gguf: dict | None,
     unknown_fields: list[str],
 ) -> dict[str, Any]:
     """Turn the flat merged fields into the nested ModelSpec-shaped dict."""
@@ -66,6 +68,7 @@ def reshape(
         "conflicts": merged.conflicts,
         "warnings": [],
         "raw_config_json": raw_config,
+        "raw_gguf_kv": raw_gguf,
         "unknown_fields": sorted(set(unknown_fields)),
     }
     return tree
@@ -77,6 +80,7 @@ def extract_from_source(source: ExtractionSource) -> ModelSpec:
 
     all_claims = []
     raw_config: dict | None = None
+    raw_gguf: dict | None = None
     unknown_fields: list[str] = []
     for ext in extractors:
         result = ext.extract(source)
@@ -84,6 +88,8 @@ def extract_from_source(source: ExtractionSource) -> ModelSpec:
         unknown_fields.extend(result.unknown_fields)
         if ext.name == "config_json":
             raw_config = result.raw
+        elif ext.name == "gguf":
+            raw_gguf = result.raw
 
     merged = merge_claims(all_claims)
     tree = reshape(
@@ -91,10 +97,14 @@ def extract_from_source(source: ExtractionSource) -> ModelSpec:
         repo_id=source.repo_id,
         source_format=source.source_format or detect_source_format(source.repo_files),
         raw_config=raw_config,
+        raw_gguf=raw_gguf,
         unknown_fields=unknown_fields,
     )
     # Pydantic's entry-point validation — the first time the schema is touched.
-    return ModelSpec.model_validate(tree)
+    spec = ModelSpec.model_validate(tree)
+    # Cross-source sanity checks append to provenance.warnings (never raise).
+    cross_validate(spec)
+    return spec
 
 
 def extract(repo_id_or_path: str, *, revision: str | None = None, offline: bool = False) -> ModelSpec:

@@ -1,5 +1,6 @@
 """Pipeline package — orchestration, merging and conflict resolution."""
 
+from modelspec.pipeline.cross_validate import cross_validate
 from modelspec.pipeline.merger import MergeResult, merge_claims
 from modelspec.pipeline.orchestrator import (
     detect_source_format,
@@ -15,4 +16,5 @@ __all__ = [
     "reshape",
     "merge_claims",
     "MergeResult",
+    "cross_validate",
 ]

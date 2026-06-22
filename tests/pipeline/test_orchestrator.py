@@ -55,3 +55,36 @@ def test_offline_rejects_nonexistent(tmp_path: Path):
 
     with pytest.raises(FileNotFoundError):
         extract("meta-llama/Llama-3.1-8B", offline=True)
+
+
+def test_local_gguf_model_end_to_end(tmp_path: Path):
+    import pytest
+
+    pytest.importorskip("gguf")
+    from tests.conftest import write_gguf
+
+    write_gguf(
+        tmp_path / "model-Q4_K_M.gguf",
+        kv={
+            "general.architecture": "llama",
+            "general.file_type": 15,
+            "llama.block_count": 4,
+            "llama.embedding_length": 16,
+            "llama.context_length": 8192,
+            "llama.attention.head_count": 8,
+            "llama.attention.head_count_kv": 2,
+            "tokenizer.ggml.model": "gpt2",
+            "tokenizer.ggml.tokens": ["x"] * 32,
+        },
+        tensors={"token_embd.weight": ([16, 8], "F32")},
+    )
+    (tmp_path / "LICENSE").write_text("Apache License\nVersion 2.0, January 2004\n")
+
+    spec = extract(str(tmp_path), offline=True)
+    assert spec.identity.source_format == "gguf"
+    assert spec.architecture.family == "llama"
+    assert spec.attention.type == "gqa"
+    assert spec.tokenizer.vocab_size == 32
+    assert spec.license.spdx_id == "apache-2.0"
+    # raw GGUF KV dump is archived under provenance.
+    assert spec.provenance.raw_gguf_kv is not None
