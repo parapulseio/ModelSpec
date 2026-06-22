@@ -39,11 +39,11 @@ queryable, evolvable, and lossless**.
 
 ## Project status
 
-**M1 (MVP) and M2 (multi-source + validation) are complete.** See [docs/roadmap.md](docs/roadmap.md).
+**M1–M3 are complete.** See [docs/roadmap.md](docs/roadmap.md).
 
 | Capability | Status |
 | --- | --- |
-| `ModelSpec` schema skeleton (8 sub-models + provenance) | ✅ M1 |
+| `ModelSpec` schema (sub-models + provenance) | ✅ M1 |
 | `config.json` extractor (alias normalization, feature inference) | ✅ M1 |
 | safetensors extractor (header-only, sharded aggregation, param count) | ✅ M1 |
 | Pipeline: orchestrator + merger + reshape | ✅ M1 |
@@ -53,10 +53,11 @@ queryable, evolvable, and lossless**.
 | License extractor (fingerprint + keyword tiers) | ✅ M2 |
 | Tokenizer extractor (type / vocab / chat template) | ✅ M2 |
 | Cross-validation (param double-path, context, MoE signals) | ✅ M2 |
-| Quantization / merge / adapter extraction | ⏳ M3 |
+| Quantization discriminated union (GGUF / AWQ / GPTQ) | ✅ M3 |
+| Merge detection (5 signals) + recipe/components + lineage | ✅ M3 |
+| BnB / FP8 / MLX quantization, adapter extraction | ⏳ later |
 
-`quantization` / `merge` / `adapter` are reserved fields and are always `null`
-until M3.
+`adapter` is a reserved field and is always `null` for now.
 
 ## Install
 

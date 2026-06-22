@@ -14,7 +14,7 @@ Design notes (see docs/schema.md):
 
 from __future__ import annotations
 
-from typing import Any, Literal, Optional
+from typing import Annotated, Any, Literal, Optional, Union
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -102,6 +102,64 @@ class MoE(_Model):
     shared_experts: Optional[int] = None
 
 
+# --- Quantization: an orthogonal optional structure, modeled as a discriminated
+# union keyed by ``format``. M3 ships GGUF / AWQ / GPTQ; BnB / FP8 / MLX follow.
+# An unrecognized quant method emits no quantization claim (stays None), so the
+# union never has to validate an unknown discriminator.
+
+
+class GGUFQuant(_Model):
+    format: Literal["gguf"]
+    file_type: Optional[str] = None  # "Q4_K_M" / "IQ3_XS"
+    bits_per_weight_avg: Optional[float] = None  # measured, not the nominal value
+    tensor_types: dict[str, int] = Field(default_factory=dict)  # {"Q4_K": 200, ...}
+    has_imatrix: Optional[bool] = None  # heuristic; None when undetermined
+
+
+class AWQQuant(_Model):
+    format: Literal["awq"]
+    bits: Optional[int] = None
+    group_size: Optional[int] = None
+    zero_point: Optional[bool] = None
+
+
+class GPTQQuant(_Model):
+    format: Literal["gptq"]
+    bits: Optional[int] = None
+    group_size: Optional[int] = None
+    desc_act: Optional[bool] = None
+
+
+Quantization = Annotated[
+    Union[GGUFQuant, AWQQuant, GPTQQuant], Field(discriminator="format")
+]
+
+
+# --- Merge: another orthogonal optional structure. Components carry whatever the
+# data source exposes; HF-tag detections often only know the model ids.
+
+
+class MergeComponent(_Model):
+    model_id: str
+    weight: Optional[float] = None
+    density: Optional[float] = None  # DARE / TIES parameter
+    role: Optional[Literal["base", "ingredient", "donor"]] = None
+
+
+class MergeSpec(_Model):
+    detection_signal: Literal[
+        "hf_tag", "config_file", "card_relation", "base_model_array", "readme_yaml"
+    ]
+    confidence: Confidence
+    method: Optional[str] = None  # normalized: "slerp" / "dare_ties" / ...
+    components: list[MergeComponent] = Field(default_factory=list)
+    base_architecture: Optional[str] = None
+    tokenizer_source: Optional[str] = None
+    mergekit_version: Optional[str] = None
+    has_config_yml: bool = False
+    raw_recipe: Optional[dict[str, Any]] = None
+
+
 class FieldProvenance(_Model):
     source: SourceLabel
     confidence: Confidence
@@ -140,11 +198,11 @@ class ModelSpec(_Model):
     tokenizer: Tokenizer = Field(default_factory=Tokenizer)
     license: License = Field(default_factory=License)
     moe: Optional[MoE] = None
-    # Orthogonal optional structures — reserved for M3, see
-    # docs/quantization-and-merge.md. Typed loosely until the discriminated
-    # unions land; always None in M1.
-    quantization: Optional[dict[str, Any]] = None
-    merge: Optional[dict[str, Any]] = None
+    # Orthogonal optional structures — independent, non-exclusive (see
+    # docs/quantization-and-merge.md). quantization + merge land in M3; adapter
+    # stays reserved (typed loosely) until its own milestone.
+    quantization: Optional[Quantization] = None
+    merge: Optional[MergeSpec] = None
     adapter: Optional[dict[str, Any]] = None
     provenance: Provenance = Field(default_factory=Provenance)
 

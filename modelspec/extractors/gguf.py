@@ -14,11 +14,39 @@ from typing import Any
 from modelspec.extractors.base import ExtractionSource, ExtractorResult, FieldClaim
 
 try:  # optional dependency — see pyproject [project.optional-dependencies].gguf
-    from gguf import GGUFReader, GGUFValueType
+    from gguf import GGUFReader, GGUFValueType, LlamaFileType
+    from gguf.constants import GGML_QUANT_SIZES
 
     _HAS_GGUF = True
 except ImportError:  # pragma: no cover - exercised only when gguf is absent
     _HAS_GGUF = False
+
+# Tensor types that are NOT quantization (full / half precision).
+_FULL_PRECISION = {"F32", "F16", "BF16", "F64"}
+
+
+def _filetype_name(value: Any) -> str | None:
+    """Map a general.file_type enum value to a readable name (e.g. "Q4_K_M")."""
+    try:
+        return LlamaFileType(int(value)).name.removeprefix("MOSTLY_")
+    except (ValueError, TypeError):
+        return None
+
+
+def _avg_bits_per_weight(type_counts: dict, total: int) -> float | None:
+    """Measured average bits-per-weight across all tensors.
+
+    GGML_QUANT_SIZES maps a tensor type to (block_elements, block_bytes); a
+    block-quantized type like Q4_K_M is ~4.83 bpw, not 4.0. Returns total bits
+    divided by total elements.
+    """
+    if not total:
+        return None
+    total_bits = 0
+    for ggml_type, count in type_counts.items():
+        block_elems, block_bytes = GGML_QUANT_SIZES[ggml_type]
+        total_bits += (count / block_elems) * block_bytes * 8
+    return round(total_bits / total, 3)
 
 
 def _scalar(field: Any) -> Any:
@@ -162,16 +190,37 @@ class GGUFExtractor:
 
         # --- parameters from tensor infos (authoritative, no data loaded) ---
         total = 0
-        type_counts: dict[str, int] = {}
+        type_counts: dict[Any, int] = {}  # GGMLQuantizationType -> element count
         for t in reader.tensors:
             n = int(prod(int(d) for d in t.shape))
             total += n
-            tname = getattr(t.tensor_type, "name", str(t.tensor_type))
-            type_counts[tname] = type_counts.get(tname, 0) + n
+            type_counts[t.tensor_type] = type_counts.get(t.tensor_type, 0) + n
+        # Readable {type_name: count} for output / quantization.tensor_types.
+        named_counts = {
+            getattr(tt, "name", str(tt)): c for tt, c in type_counts.items()
+        }
         if reader.tensors:
             claims.append(FieldClaim("parameters.total", total, "tensors", "high"))
-            dominant = max(type_counts.items(), key=lambda kv: kv[1])[0]
+            dominant = max(named_counts.items(), key=lambda kv: kv[1])[0]
             claims.append(FieldClaim("parameters.dtype_native", dominant, "tensors", "high"))
+
+        # --- quantization (GGUF branch of the discriminated union) ---
+        if any(name not in _FULL_PRECISION for name in named_counts):
+            claims.append(FieldClaim("quantization.format", "gguf", "gguf", "high"))
+            ft_name = _filetype_name(get("general.file_type")) or dominant
+            claims.append(FieldClaim("quantization.file_type", ft_name, "gguf", "high"))
+            bpw = _avg_bits_per_weight(type_counts, total)
+            if bpw is not None:
+                claims.append(
+                    FieldClaim("quantization.bits_per_weight_avg", bpw, "tensors", "high")
+                )
+            claims.append(
+                FieldClaim("quantization.tensor_types", named_counts, "tensors", "high")
+            )
+            # imatrix can't be told apart at the byte level; filename is the only
+            # cheap cue. Leave None when absent rather than asserting False.
+            if "imat" in path.name.lower():
+                claims.append(FieldClaim("quantization.has_imatrix", True, "heuristic", "low"))
 
         claims.append(FieldClaim("identity.file_layout", "single", "gguf", "high"))
         claims.append(FieldClaim("architecture.tags", tags, "inferred", "medium"))
