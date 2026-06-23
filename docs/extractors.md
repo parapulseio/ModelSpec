@@ -61,6 +61,16 @@ ALIASES = {
 }
 ```
 
+### Multimodal (VLM) nested config
+
+VLM / multimodal configs (`*ForConditionalGeneration`) nest the language-model fields under `text_config` (vision under `vision_config`). `_llm_config(raw)` reads top-level first and falls back to `text_config`, so the LM fields (layers / heads / context / head_dim / special tokens) are recovered for these models. A `multimodal` tag is added when `vision_config` / `audio_config` is present.
+
+### Model kind & scope
+
+`_classify_kind(raw)` labels the model from `architectures[0]` / `model_type`: `causal_lm`, `multimodal`, `encoder` (BERT/RoBERTa classification/MLM), `audio` (wav2vec2/CTC/Whisper), `vision` (CLIP/ViT), `seq2seq` (T5/BART), or `unknown`. The kind becomes a tag, and `decoder-only` is now added **only** for decoder-scope models (causal_lm / VLM) — previously it was added to everything, including encoders.
+
+For non-decoder-scope models, any decoder-centric canonical field we couldn't fill (`attention.type`, `context.declared`, …) is flagged `not_applicable` instead of counted as a coverage gap. It's **self-correcting**: a field that *was* filled (e.g. BERT's `num_layers`/`context.declared`) stays as real signal; only genuinely-missing ones are marked N/A. So audio/vision models stop dragging down the decoder-field fill rates (see [analytics.md](analytics.md)).
+
 ### Feature inference
 
 - `num_local_experts` / `num_experts` present → `architecture.is_moe = True`

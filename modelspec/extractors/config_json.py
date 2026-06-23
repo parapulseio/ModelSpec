@@ -14,13 +14,17 @@ from modelspec.extractors.base import ExtractionSource, ExtractorResult, FieldCl
 # Same canonical field may appear under several historical HF names
 # (GPT-2 style vs Llama style). First match wins.
 ALIASES: dict[str, list[str]] = {
-    "architecture.num_layers": ["num_hidden_layers", "n_layer", "n_layers"],
+    "architecture.num_layers": ["num_hidden_layers", "n_layer", "n_layers", "num_layers"],
     "architecture.hidden_size": ["hidden_size", "n_embd", "d_model"],
+    "architecture.head_dim": ["head_dim"],
     "context.declared": ["max_position_embeddings", "n_positions", "seq_length"],
     "attention.num_heads": ["num_attention_heads", "n_head", "num_heads"],
     "attention.num_kv_heads": ["num_key_value_heads", "num_kv_heads"],
     "attention.sliding_window": ["sliding_window"],
     "tokenizer.vocab_size": ["vocab_size"],
+    "tokenizer.bos_token_id": ["bos_token_id"],
+    "tokenizer.eos_token_id": ["eos_token_id"],
+    "tokenizer.pad_token_id": ["pad_token_id"],
 }
 
 # Map common architectures[0] class names to a normalized family label.
@@ -58,6 +62,21 @@ KNOWN_PASSTHROUGH = {
     "kv_lora_rank",
     "model_type",
     "architectures",
+    # Multimodal nested configs — the language-model fields are read from
+    # text_config (see _llm_config); the rest is recognized but unmapped.
+    "text_config",
+    "vision_config",
+    "audio_config",
+    "llm_config",
+    # Recognized high-frequency fields (from the M4 promotion-candidate report);
+    # buffered in passthrough until a downstream consumer warrants canonical.
+    "hidden_act",
+    "rms_norm_eps",
+    "layer_norm_eps",
+    "layer_norm_epsilon",
+    "use_sliding_window",
+    "max_window_layers",
+    "position_embedding_type",
 }
 
 
@@ -78,6 +97,64 @@ def _infer_family(raw: dict) -> str | None:
         return stripped or None
     mt = raw.get("model_type")
     return str(mt) if mt else None
+
+
+# Causal-LM-specific canonical fields. For models that are NOT decoder LLMs
+# (audio / vision / encoder / seq2seq), any of these we couldn't fill is marked
+# not_applicable rather than counted as a coverage gap.
+_DECODER_FIELDS = (
+    "architecture.num_layers",
+    "architecture.hidden_size",
+    "architecture.head_dim",
+    "attention.type",
+    "attention.num_heads",
+    "attention.num_kv_heads",
+    "context.declared",
+)
+
+
+def _classify_kind(raw: dict) -> str:
+    """Classify the model kind from architectures[0] / model_type.
+
+    Used to keep non-decoder models (audio / vision / encoder / seq2seq) from
+    polluting the decoder-centric coverage statistics.
+    """
+    archs = raw.get("architectures")
+    cls = str(archs[0]).lower() if isinstance(archs, list) and archs else ""
+    mt = str(raw.get("model_type", "")).lower()
+    if cls.endswith("forcausallm"):
+        return "causal_lm"
+    if isinstance(raw.get("text_config"), dict) or isinstance(raw.get("llm_config"), dict):
+        return "multimodal"  # VLM whose LM fields we read from text_config
+    if "ctc" in cls or "wav2vec2" in cls or "audio" in cls or "hubert" in cls or mt in (
+        "whisper",
+        "wav2vec2",
+    ):
+        return "audio"
+    if "clip" in cls or "vision" in cls or "image" in cls or cls.endswith("vitmodel"):
+        return "vision"
+    if cls.endswith("forconditionalgeneration") or mt in ("t5", "bart", "mt5", "mbart"):
+        return "seq2seq"
+    if any(
+        s in cls
+        for s in ("formaskedlm", "forsequenceclassification", "fortokenclassification",
+                  "forquestionanswering", "formultiplechoice")
+    ):
+        return "encoder"
+    return "unknown"
+
+
+def _llm_config(raw: dict) -> dict:
+    """Effective config for language-model fields, with multimodal fallback.
+
+    VLM / multimodal configs (e.g. *ForConditionalGeneration) nest the LM fields
+    under ``text_config`` (vision under ``vision_config``). We read top-level
+    first, falling back to the text sub-config so those models aren't left empty.
+    """
+    sub = raw.get("text_config") or raw.get("llm_config")
+    if isinstance(sub, dict):
+        return {**sub, **raw}  # top-level wins; the text sub-config fills gaps
+    return raw
 
 
 def _covered_keys() -> set[str]:
@@ -137,17 +214,27 @@ class ConfigJsonExtractor:
         claims: list[FieldClaim] = []
         not_applicable: list[str] = []
 
+        # LM fields are read from `eff`: top-level, falling back to text_config for
+        # multimodal models. `raw` stays the source for family / quantization /
+        # passthrough.
+        eff = _llm_config(raw)
+
+        # Model kind drives scope: non-decoder models (audio/vision/encoder/seq2seq)
+        # shouldn't count missing decoder fields as gaps.
+        kind = _classify_kind(raw)
+        decoder_scope = kind in ("causal_lm", "multimodal")
+
         # MLA (DeepSeek style) — detected up front so it takes precedence over the
         # head-count heuristic and suppresses the (inoperative) kv-head count.
-        is_mla = "kv_lora_rank" in raw or "q_lora_rank" in raw
+        is_mla = "kv_lora_rank" in eff or "q_lora_rank" in eff
 
         # --- canonical layer: alias normalization ---
         for canonical_path, candidates in ALIASES.items():
             if is_mla and canonical_path == "attention.num_kv_heads":
                 continue  # GQA kv-head count is not the operative quantity under MLA
             for name in candidates:
-                if name in raw:
-                    claims.append(FieldClaim(canonical_path, raw[name], "config", "high"))
+                if name in eff:
+                    claims.append(FieldClaim(canonical_path, eff[name], "config", "high"))
                     break
 
         family = _infer_family(raw)
@@ -155,10 +242,18 @@ class ConfigJsonExtractor:
             claims.append(FieldClaim("architecture.family", family, "config", "high"))
 
         # --- feature inference -> architecture tags & attention type ---
-        tags: list[str] = ["decoder-only"]
+        tags: list[str] = []
+        if decoder_scope:
+            tags.append("decoder-only")
+        if kind == "multimodal" or isinstance(raw.get("vision_config"), dict) or isinstance(
+            raw.get("audio_config"), dict
+        ):
+            tags.append("multimodal")
+        if kind in ("encoder", "audio", "vision", "seq2seq"):
+            tags.append(kind)
 
-        n_heads = raw.get("num_attention_heads")
-        n_kv = raw.get("num_key_value_heads")
+        n_heads = eff.get("num_attention_heads")
+        n_kv = eff.get("num_key_value_heads")
         if is_mla:
             claims.append(FieldClaim("attention.type", "mla", "inferred", "high"))
             tags.append("mla")
@@ -180,35 +275,35 @@ class ConfigJsonExtractor:
                 claims.append(FieldClaim("attention.num_kv_heads", n_heads, "inferred", "high"))
 
         # MoE detection.
-        n_experts = raw.get("num_local_experts") or raw.get("num_experts")
+        n_experts = eff.get("num_local_experts") or eff.get("num_experts")
         if n_experts:
             claims.append(FieldClaim("moe.num_experts", n_experts, "config", "high"))
-            top_k = raw.get("num_experts_per_tok")
+            top_k = eff.get("num_experts_per_tok")
             if top_k is not None:
                 claims.append(FieldClaim("moe.top_k", top_k, "config", "high"))
-            shared = raw.get("n_shared_experts")
+            shared = eff.get("n_shared_experts")
             if shared is not None:
                 claims.append(FieldClaim("moe.shared_experts", shared, "config", "high"))
             tags.append("moe")
 
         # RoPE scaling -> tag + effective context.
-        rope = raw.get("rope_scaling")
+        rope = eff.get("rope_scaling")
         if isinstance(rope, dict):
             rope_type = rope.get("type") or rope.get("rope_type")
             if rope_type:
                 tags.append(f"rope-{rope_type}")
             factor = rope.get("factor")
-            declared = raw.get("max_position_embeddings")
+            declared = eff.get("max_position_embeddings")
             if isinstance(factor, (int, float)) and isinstance(declared, int):
                 claims.append(
                     FieldClaim("context.effective", int(declared * factor), "inferred", "medium")
                 )
 
-        if raw.get("sliding_window"):
+        if eff.get("sliding_window"):
             tags.append("sliding-window")
 
         # tie_word_embeddings is a declared hint; tensor presence is authoritative.
-        if raw.get("tie_word_embeddings") is True:
+        if eff.get("tie_word_embeddings") is True:
             tags.append("tied-embed")
             claims.append(
                 FieldClaim("architecture.tied_embeddings", True, "config", "medium")
@@ -218,6 +313,15 @@ class ConfigJsonExtractor:
         claims.extend(_extract_quantization(raw))
 
         claims.append(FieldClaim("architecture.tags", tags, "inferred", "medium"))
+
+        # Scope: for non-decoder models, decoder fields we couldn't fill are N/A
+        # (not gaps). Self-correcting — only fields actually missing are flagged,
+        # so an encoder (BERT) that does have layers/heads keeps them filled.
+        if not decoder_scope:
+            claimed = {c.field_path for c in claims}
+            for path_ in _DECODER_FIELDS:
+                if path_ not in claimed and path_ not in not_applicable:
+                    not_applicable.append(path_)
 
         # --- passthrough + raw + unknown ---
         passthrough = {k: raw[k] for k in KNOWN_PASSTHROUGH if k in raw}

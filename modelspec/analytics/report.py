@@ -24,6 +24,7 @@ CANONICAL_FIELDS: list[str] = [
     "architecture.family",
     "architecture.num_layers",
     "architecture.hidden_size",
+    "architecture.head_dim",
     "attention.type",
     "attention.num_heads",
     "attention.num_kv_heads",
@@ -31,6 +32,7 @@ CANONICAL_FIELDS: list[str] = [
     "parameters.dtype_native",
     "context.declared",
     "tokenizer.vocab_size",
+    "tokenizer.eos_token_id",
     "license.spdx_id",
 ]
 

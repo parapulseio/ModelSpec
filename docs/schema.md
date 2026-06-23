@@ -59,6 +59,7 @@ ModelSpec
 - `variant: str | None`
 - `num_layers: int`
 - `hidden_size: int`
+- `head_dim: int | None` — per-head dimension (not always `hidden/num_heads`, e.g. MLA); needed for KV-cache sizing / vLLM
 - `tied_embeddings: bool` — inferred from whether the tensor header has `lm_head.weight`
 - `tags: list[str]` — a **tag set rather than a single string**, e.g. `["decoder-only", "moe", "gqa", "rope-yarn", "tied-embed"]`, better suited to downstream search/filtering
 
@@ -87,6 +88,7 @@ ModelSpec
 - `type: str` — BPE / Unigram …
 - `vocab_size: int`
 - `chat_template_present: bool`
+- `bos_token_id` / `eos_token_id` / `pad_token_id: int | list[int] | None` — special token ids (needed for fine-tuning); `eos` may be a list (e.g. Llama 3)
 
 ### License (three-tier identification, see extractors.md)
 - `spdx_id: str | None`

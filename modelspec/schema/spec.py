@@ -70,6 +70,10 @@ class Architecture(_Model):
     variant: Optional[str] = Field(default=None, description="Sub-variant within the family, if known.")
     num_layers: Optional[int] = Field(default=None, description="Number of transformer blocks.")
     hidden_size: Optional[int] = Field(default=None, description="Model hidden / embedding dimension.")
+    head_dim: Optional[int] = Field(
+        default=None,
+        description="Per-head dimension (often hidden_size/num_heads, but not under MLA); used for KV-cache sizing.",
+    )
     tied_embeddings: Optional[bool] = Field(
         default=None,
         description="True if input embeddings are tied to the output head (no separate lm_head.weight).",
@@ -133,6 +137,15 @@ class Tokenizer(_Model):
     vocab_size: Optional[int] = Field(default=None, description="Vocabulary size (incl. added tokens).")
     chat_template_present: Optional[bool] = Field(
         default=None, description="True if a chat template is shipped (a weak instruct-model proxy)."
+    )
+    bos_token_id: Optional[Union[int, list[int]]] = Field(
+        default=None, description="Begin-of-sequence token id (required to set up fine-tuning)."
+    )
+    eos_token_id: Optional[Union[int, list[int]]] = Field(
+        default=None, description="End-of-sequence token id(s); may be a list (e.g. Llama 3)."
+    )
+    pad_token_id: Optional[Union[int, list[int]]] = Field(
+        default=None, description="Padding token id."
     )
 
 

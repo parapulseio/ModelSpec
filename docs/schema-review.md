@@ -63,7 +63,14 @@ layer (e.g. `modelspec/derive.py` producing a `DerivedView`, or helper functions
 values on demand. This is exactly the shape of the proposed **M5 "help
 function"** milestone.
 
-### C. Many development/inference-critical fields live only in raw (tasks 3, 4)
+### C. Many development/inference-critical fields live only in raw (tasks 3, 4) — partly done
+
+> **Promoted (M4-driven):** `architecture.head_dim` and `tokenizer.{bos,eos,pad}_token_id`
+> are now canonical (they ranked high in the coverage `promotion_candidates`).
+> Also: VLM nested `text_config` is now read, so multimodal models fill the LM
+> fields. Remaining (`intermediate_size`, `rope_theta`, norm/activation) stay in
+> passthrough for now.
+
 
 `intermediate_size`, `rope_theta`, `head_dim`, `norm_type`, `activation_fn`,
 attention bias, and tokenizer special tokens are present in
