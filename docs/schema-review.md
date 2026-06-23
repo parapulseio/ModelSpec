@@ -44,7 +44,10 @@ the coverage report all conflate the two.
 - a sentinel value distinct from `None`.
 
 The provenance-list option is the least invasive and reuses the existing
-provenance home.
+provenance home. **Implemented:** `provenance.not_applicable` (the MLA branch
+flags `attention.num_kv_heads`), and the coverage report now excludes N/A models
+from each field's fill-rate denominator so legitimately-absent fields are no
+longer reported as low-coverage gaps (see [analytics.md](analytics.md)).
 
 ### B. Extracted facts vs derived values — keep them separate (tasks 2, 4)
 

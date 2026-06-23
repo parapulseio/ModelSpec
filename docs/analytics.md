@@ -9,7 +9,7 @@ M1–M3 solve "**extract one model**"; M4 turns back to govern the system itself
 | Capability | Signal | Question it answers |
 | --- | --- | --- |
 | `unknown_fields` frequency | fields that recur in raw but were claimed by neither canonical nor passthrough | **what to start extracting** (promotion candidates) |
-| canonical fill rate | the fraction of models in which each canonical field was successfully filled | **what existing extraction is missing** (alias-table gaps / extractor bugs) |
+| canonical fill rate | the fraction of **applicable** models in which each canonical field was filled (models that flagged the field `not_applicable` are excluded from the denominator) | **what existing extraction is missing** (alias-table gaps / extractor bugs), without N/A false alarms |
 | per-family fill rate | fill rate grouped by `architecture.family` | distinguish "**semantically N/A**" from "**missed extraction**" (e.g. DeepSeek-MLA simply has no `num_kv_heads`) |
 
 ## Module structure
@@ -26,6 +26,7 @@ modelspec/analytics/
 - **`build_coverage_report(result, *, promotion_threshold=0.10, top_n=20)`** → `CoverageReport`
   - Aggregated entirely from `provenance`, **no re-download**.
   - `promotion_candidates`: unknown fields appearing in ≥10% of models (the raw → passthrough promotion threshold, see [extractors.md](extractors.md)).
+  - **Fill rates are over applicable models**: for each field the denominator subtracts the models that listed it in `provenance.not_applicable`, so a legitimately-absent field (e.g. `num_kv_heads` under MLA) is never flagged `<-- low`. The report also exposes per-field `na_counts`.
 
 ## CLI
 
@@ -84,7 +85,7 @@ Driven by report data, to avoid adding fields on a hunch:
 1. Run `coverage` (or sample first with `--limit`) → look at `promotion_candidates`.
 2. **raw → passthrough**: a field appearing in >10% of models that you can describe in one sentence → add it to the relevant extractor's `KNOWN_PASSTHROUGH`.
 3. **passthrough → canonical**: only promote to a strictly-typed field when there is a clear downstream consumer (canonical carries a compatibility burden, be careful).
-4. Also watch the canonical fill rates: a canonical field <50% is usually an **alias-table gap** — fill in `ALIASES`; if it concentrates as N/A within a family (e.g. DeepSeek `num_kv_heads`), that's semantically normal and needs no fix.
+4. Also watch the canonical fill rates: a canonical field flagged `<-- low` is now a real gap (N/A models are already excluded) — usually an **alias-table gap**, so fill in `ALIASES`. A field shown with `(n/a: N)` or `(all N N/A)` is legitimately absent for those models and needs no fix; if a family is wrongly counted as a gap, the relevant extractor should emit `not_applicable` for it (as the MLA branch does for `num_kv_heads`).
 
 ## Example output (excerpt)
 
@@ -101,9 +102,10 @@ promotion candidates (>= 10% of models):
   62.3%   22270  decoder_sparse_step
   ...
 
-canonical fill rates:
+canonical fill rates (over applicable models):
   98.7%  architecture.family
-  61.2%  attention.num_kv_heads        <-- low
+  99.1%  attention.num_kv_heads  (n/a: 210)   # MLA models excluded from the denominator
+  45.0%  tokenizer.vocab_size        <-- low  # a real gap
   ...
 
 per-family fill rates (family: n):
