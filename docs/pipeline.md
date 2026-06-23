@@ -28,7 +28,7 @@ Call `huggingface_hub.list_repo_files()` to list the repo's files, classify by f
 
 ## 2. Precise download `io/hf_fetcher`
 
-**No weights, metadata only.** For safetensors, use an HTTP Range request for the header only (the first 8 bytes give the JSON header length, usually a few hundred KB + buffer). An 8B model's weights are 16GB but the actual download is ~a few MB.
+**No weights, metadata only.** For safetensors, use an HTTP Range request for the header only (the first 8 bytes give the JSON header length, usually a few hundred KB + buffer). An 8B model's weights are 16GB but the actual download is ~a few MB. Per-shard header fetches run **concurrently** (`_FETCH_WORKERS`), so a 685B model with 160+ shards still completes in ~15s.
 
 ## 3. Parallel parsing
 

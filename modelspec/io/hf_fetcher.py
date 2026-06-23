@@ -17,6 +17,7 @@ import os
 import shutil
 import struct
 import tempfile
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Iterator
@@ -53,6 +54,9 @@ _LICENSE_NAMES = {
 # GGUF header + tensor-info section sits at the file start; this prefix is enough
 # for GGUFReader to parse all KV and tensor shapes/types without the weights.
 _GGUF_PREFIX = 24 * 1024 * 1024  # 24 MB
+# Concurrent per-file downloads within one model (shards are independent). Keeps
+# huge sharded models fast without hammering the Hub; HF_TOKEN avoids throttling.
+_FETCH_WORKERS = 16
 # Safety cap on the safetensors JSON header (guards against an absurd length).
 _SAFETENSORS_HEADER_CAP = 256 * 1024 * 1024  # 256 MB
 
@@ -165,25 +169,50 @@ def _download_gguf_header(
     target.write_bytes(data)
 
 
+def _plan_downloads(repo_id, revision, tmp, session, repo_files):
+    """Build the list of (callable, args) download tasks for a repo.
+
+    Each task is independent and writes a distinct path under ``tmp``, so they
+    can run concurrently.
+    """
+    tasks = []
+    for fn in repo_files:
+        base = fn.rsplit("/", 1)[-1]
+        if base in _SMALL_FILES or base in _LICENSE_NAMES:
+            tasks.append((_download_full, (repo_id, fn, revision, tmp)))
+        elif fn.endswith(".safetensors"):
+            tasks.append((_download_safetensors_header, (session, repo_id, fn, revision, tmp)))
+        elif fn.endswith(".gguf"):
+            tasks.append((_download_gguf_header, (session, repo_id, fn, revision, tmp)))
+        # other weights (.bin, .pth, etc.) are intentionally skipped.
+    return tasks
+
+
 @contextmanager
-def fetch_metadata(repo_id: str, revision: str | None = None) -> Iterator[ExtractionSource]:
+def fetch_metadata(
+    repo_id: str, revision: str | None = None, max_workers: int = _FETCH_WORKERS
+) -> Iterator[ExtractionSource]:
     """Download a model's metadata into a temp dir and yield an ExtractionSource.
 
-    The temp dir is cleaned up when the context exits.
+    File downloads (small files + per-shard safetensors/GGUF headers) run
+    concurrently, so a model with hundreds of shards (e.g. a 685B model) is
+    fetched in seconds instead of one sequential round-trip per shard. A single
+    failed download propagates (the caller records the target as a failure),
+    matching the previous sequential behaviour. The temp dir is cleaned up when
+    the context exits.
     """
     repo_files = _list_repo_files(repo_id, revision)
     tmp = Path(tempfile.mkdtemp(prefix="modelspec-"))
     session = _make_session()
     try:
-        for fn in repo_files:
-            base = fn.rsplit("/", 1)[-1]
-            if base in _SMALL_FILES or base in _LICENSE_NAMES:
-                _download_full(repo_id, fn, revision, tmp)
-            elif fn.endswith(".safetensors"):
-                _download_safetensors_header(session, repo_id, fn, revision, tmp)
-            elif fn.endswith(".gguf"):
-                _download_gguf_header(session, repo_id, fn, revision, tmp)
-            # other weights (.bin, .pth, etc.) are intentionally skipped.
+        tasks = _plan_downloads(repo_id, revision, tmp, session, repo_files)
+        if tasks:
+            with ThreadPoolExecutor(max_workers=min(max_workers, len(tasks))) as pool:
+                futures = [pool.submit(fn_, *args) for fn_, args in tasks]
+                # Re-raise the first download error (others are allowed to finish
+                # as the pool shuts down) so the target is recorded as failed.
+                for fut in futures:
+                    fut.result()
 
         source = ExtractionSource(
             root=tmp,
