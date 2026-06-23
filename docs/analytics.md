@@ -20,8 +20,9 @@ modelspec/analytics/
 └── report.py     # build_coverage_report: aggregate the three signals + text/JSON rendering
 ```
 
-- **`run_batch(targets, *, offline, revision, max_workers, limit, on_progress)`** → `BatchResult`
-  - IO-bound (metadata downloads), uses a thread pool; **a single target's failure is recorded and never aborts the batch**.
+- **`run_batch(targets, *, offline, revision, max_workers, limit, on_progress, target_timeout)`** → `BatchResult`
+  - IO-bound (metadata downloads), runs targets concurrently in daemon threads; **a single target's failure is recorded and never aborts the batch**.
+  - **Per-target timeout** (`target_timeout`, default 120s): a slow / huge / hung repo — e.g. a 685B model whose 160+ shard headers are fetched sequentially — is abandoned and recorded as a `TimeoutError` failure, so it can't stall the whole run. Set a HF token (`HF_TOKEN`) to avoid rate-limit slowdowns.
   - Results preserve order; `BatchResult` exposes `specs` / `failures` / `succeeded` / `failed` / `total`.
 - **`build_coverage_report(result, *, promotion_threshold=0.10, top_n=20)`** → `CoverageReport`
   - Aggregated entirely from `provenance`, **no re-download**.
@@ -71,6 +72,7 @@ TheBloke/Mistral-7B-v0.1-GGUF      # a GGUF repo
 | `--offline` | local paths only, no network |
 | `--workers N` | concurrent extractions (default 8) |
 | `--limit N` | process only the first N (sampling) |
+| `--target-timeout S` | per-target seconds budget (default 120); a slow/hung repo is recorded as a `TimeoutError` failure instead of stalling the batch. `0` disables it. |
 | `--format text\|json` | output format (default: the text dashboard) |
 | `--top N` | rows in the frequency tables (default 20) |
 | `--quiet` | suppress the stderr progress line |

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 from pathlib import Path
 
 from modelspec.analytics import read_targets, run_batch
@@ -50,6 +51,32 @@ def test_progress_callback(tmp_path: Path):
     seen = []
     run_batch([str(tmp_path / "a")], offline=True, on_progress=lambda d, t: seen.append((d, t)))
     assert seen[-1] == (1, 1)
+
+
+def test_target_timeout_records_failure(monkeypatch, tmp_path: Path):
+    # A target whose extraction blocks longer than the budget is abandoned and
+    # recorded as a timeout failure; the fast one still succeeds.
+    import modelspec.analytics.batch as batch_mod
+
+    _make_model(tmp_path / "fast")
+    real_extract = batch_mod.extract
+
+    def fake_extract(target, *, revision=None, offline=False):
+        if target.endswith("slow"):
+            time.sleep(5)  # exceeds the 0.3s budget below
+        return real_extract(target, revision=revision, offline=offline)
+
+    monkeypatch.setattr(batch_mod, "extract", fake_extract)
+
+    result = run_batch(
+        [str(tmp_path / "fast"), str(tmp_path / "slow")],
+        offline=True,
+        max_workers=2,
+        target_timeout=0.3,
+    )
+    assert result.succeeded == 1
+    assert result.failed == 1
+    assert "TimeoutError" in result.failures[0].error
 
 
 def test_read_targets_skips_comments_and_blanks(tmp_path: Path):

@@ -1,20 +1,27 @@
 """Batch extraction — run the pipeline over many targets, fault-tolerant.
 
 Each target (a HF repo id or a local dir) is extracted independently; a failure
-is recorded, never fatal. Extraction is IO-bound (metadata downloads), so a
-thread pool gives good throughput. See docs/analytics.md.
+is recorded, never fatal. Extraction is IO-bound (metadata downloads), so we run
+several targets concurrently. A per-target wall-clock timeout means a single
+slow / huge / hung repo (e.g. a 685B model with 160+ shards) is recorded as a
+failure and skipped instead of stalling the whole batch. See docs/analytics.md.
 """
 
 from __future__ import annotations
 
 import sys
-from concurrent.futures import ThreadPoolExecutor, as_completed
+import threading
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Iterable
 
 from modelspec.pipeline import extract
 from modelspec.schema import ModelSpec
+
+# Default per-target wall-clock budget (seconds). Generous enough for a normal
+# sharded model, short enough that one pathological repo can't hang a batch.
+DEFAULT_TARGET_TIMEOUT = 120.0
 
 
 @dataclass
@@ -88,28 +95,54 @@ def run_batch(
     max_workers: int = 8,
     limit: int | None = None,
     on_progress: Callable[[int, int], None] | None = None,
+    target_timeout: float | None = DEFAULT_TARGET_TIMEOUT,
 ) -> BatchResult:
     """Extract every target concurrently and collect the outcomes.
 
     Results preserve the input order. ``on_progress(done, total)`` is invoked
-    after each completion (useful for a CLI progress line).
+    after each completion. Each target runs in its own daemon thread with a
+    ``target_timeout`` (seconds) wall-clock budget; a target that exceeds it is
+    recorded as a ``TimeoutError`` failure and the batch moves on (the daemon
+    thread, if still doing network IO, won't block process exit). Pass
+    ``target_timeout=None`` (or <= 0) to disable the timeout.
     """
     targets = list(targets)
     if limit is not None:
         targets = targets[:limit]
     total = len(targets)
+    workers = max(1, max_workers)
+    budget = target_timeout if (target_timeout and target_timeout > 0) else None
 
     results: dict[int, BatchItem] = {}
+    lock = threading.Lock()
     done = 0
-    with ThreadPoolExecutor(max_workers=max(1, max_workers)) as pool:
-        futures = {
-            pool.submit(_extract_one, t, revision=revision, offline=offline): i
-            for i, t in enumerate(targets)
-        }
-        for fut in as_completed(futures):
-            idx = futures[fut]
-            results[idx] = fut.result()
-            done += 1
+
+    def _worker(idx: int, target: str) -> None:
+        item = _extract_one(target, revision=revision, offline=offline)
+        with lock:
+            results.setdefault(idx, item)  # ignore if already marked timed-out
+
+    # Process in waves of `workers`; join each wave against a shared deadline so a
+    # stuck target is abandoned (daemon) and recorded as a timeout failure.
+    for start in range(0, total, workers):
+        wave = list(enumerate(targets[start : start + workers], start=start))
+        threads = [
+            (idx, target, threading.Thread(target=_worker, args=(idx, target), daemon=True))
+            for idx, target in wave
+        ]
+        for _, _, th in threads:
+            th.start()
+        deadline = time.monotonic() + budget if budget else None
+        for idx, target, th in threads:
+            timeout = max(0.0, deadline - time.monotonic()) if deadline else None
+            th.join(timeout)
+            with lock:
+                if idx not in results:
+                    results[idx] = BatchItem(
+                        target=target,
+                        error=f"TimeoutError: exceeded {target_timeout}s (slow/hung target)",
+                    )
+                done += 1
             if on_progress is not None:
                 on_progress(done, total)
 

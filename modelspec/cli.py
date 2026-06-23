@@ -97,6 +97,7 @@ def _run_batch_from_args(args: argparse.Namespace):
         max_workers=args.workers,
         limit=args.limit,
         on_progress=progress,
+        target_timeout=args.target_timeout,
     )
 
 
@@ -158,6 +159,12 @@ def _add_batch_options(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--revision", help="commit / branch / tag")
     parser.add_argument("--workers", type=int, default=8, help="concurrent extractions")
     parser.add_argument("--limit", type=int, help="only process the first N targets (sampling)")
+    parser.add_argument(
+        "--target-timeout",
+        type=float,
+        default=120.0,
+        help="per-target seconds budget; slow/hung targets are recorded as failures (0 = no limit)",
+    )
     parser.add_argument("--format", choices=["text", "json"], default="text")
     parser.add_argument("--top", type=int, default=20, help="rows for unknown_fields tables")
     parser.add_argument("--quiet", action="store_true", help="suppress the progress line")
