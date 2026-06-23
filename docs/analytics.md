@@ -40,7 +40,30 @@ modelspec coverage repos.txt --offline
 modelspec coverage repos.txt --limit 1000 --workers 16 --format json
 ```
 
-`repos.txt`: one HF repo id or local directory path per line; `#` comments and blank lines are ignored; `-` reads from stdin.
+### Targets file format
+
+The targets file is plain text, parsed by `read_targets`:
+
+- **One target per line.** A target is anything `extract` accepts: an **HF repo id** (`org/name`) or a **local directory path** (absolute or relative).
+- **`#` starts a comment** — both full-line comments and inline trailing comments are stripped.
+- **Blank lines are ignored.**
+- **No quoting / escaping** — the line (after stripping the comment and surrounding whitespace) is the target verbatim. Don't wrap paths in quotes.
+- **`-` as the filename** (i.e. `modelspec coverage -`) reads the list from **stdin** instead of a file, so you can pipe: `cat repos.txt | modelspec coverage -`.
+
+Example (`repos.txt`):
+
+```text
+# HF repo ids
+meta-llama/Llama-3.1-8B-Instruct
+Qwen/Qwen2.5-7B-Instruct
+TheBloke/Mistral-7B-v0.1-GGUF      # a GGUF repo
+
+# local directories (use with --offline)
+/data/models/my-merge
+./fixtures/tiny-llama
+```
+
+> Mixing repo ids and local paths in one file is fine. With `--offline`, repo-id lines that aren't local directories will simply fail and be recorded in the report's `failures` (they don't abort the run).
 
 | Option | Description |
 | --- | --- |
