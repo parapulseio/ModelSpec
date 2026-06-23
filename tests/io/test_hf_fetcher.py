@@ -99,6 +99,35 @@ def test_fetch_metadata_parallel_aggregates_many_shards(monkeypatch):
     assert spec.parameters.total == n * 100  # all shards aggregated, none dropped
 
 
+def test_fetch_metadata_caps_total_concurrency(monkeypatch):
+    # Many shards + a high max_workers, but the process-wide semaphore must keep
+    # the real concurrency bounded (else fd / connection exhaustion at scale).
+    import threading
+    import time
+
+    repo_files = _sharded_repo_files(50)
+    monkeypatch.setattr(hf, "_list_repo_files", lambda repo_id, revision: repo_files)
+    monkeypatch.setattr(hf, "_DOWNLOAD_SEMAPHORE", threading.BoundedSemaphore(3))
+    monkeypatch.setattr(hf, "_download_full", lambda *a: None)
+
+    state = {"cur": 0, "max": 0}
+    lock = threading.Lock()
+
+    def track(session, repo_id, fn, revision, dest):
+        with lock:
+            state["cur"] += 1
+            state["max"] = max(state["max"], state["cur"])
+        time.sleep(0.01)
+        with lock:
+            state["cur"] -= 1
+
+    monkeypatch.setattr(hf, "_download_safetensors_header", track)
+
+    with hf.fetch_metadata("org/x", max_workers=16):
+        pass
+    assert state["max"] <= 3  # never more than the global permit, despite 16 workers
+
+
 def test_fetch_metadata_propagates_a_download_failure(monkeypatch):
     repo_files = _sharded_repo_files(5)
     monkeypatch.setattr(hf, "_list_repo_files", lambda repo_id, revision: repo_files)

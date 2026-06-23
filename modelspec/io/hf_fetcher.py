@@ -17,6 +17,7 @@ import os
 import shutil
 import struct
 import tempfile
+import threading
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from pathlib import Path
@@ -57,6 +58,19 @@ _GGUF_PREFIX = 24 * 1024 * 1024  # 24 MB
 # Concurrent per-file downloads within one model (shards are independent). Keeps
 # huge sharded models fast without hammering the Hub; HF_TOKEN avoids throttling.
 _FETCH_WORKERS = 16
+# Process-wide cap on simultaneous downloads, shared across ALL targets. In a
+# batch run, per-target (_FETCH_WORKERS) × per-batch (--workers) parallelism is
+# multiplicative and would otherwise exhaust file descriptors / connections
+# ("Too many open files", "Max retries exceeded"). This semaphore bounds the
+# real concurrency regardless of how many targets/shards are in flight.
+_MAX_CONCURRENT_DOWNLOADS = 16
+_DOWNLOAD_SEMAPHORE = threading.BoundedSemaphore(_MAX_CONCURRENT_DOWNLOADS)
+
+
+def _guarded(fn, args):
+    """Run one download holding the global concurrency permit."""
+    with _DOWNLOAD_SEMAPHORE:
+        return fn(*args)
 # Safety cap on the safetensors JSON header (guards against an absurd length).
 _SAFETENSORS_HEADER_CAP = 256 * 1024 * 1024  # 256 MB
 
@@ -208,7 +222,9 @@ def fetch_metadata(
         tasks = _plan_downloads(repo_id, revision, tmp, session, repo_files)
         if tasks:
             with ThreadPoolExecutor(max_workers=min(max_workers, len(tasks))) as pool:
-                futures = [pool.submit(fn_, *args) for fn_, args in tasks]
+                # Each task holds the process-wide download permit, so total
+                # concurrency stays bounded even across many targets in a batch.
+                futures = [pool.submit(_guarded, fn_, args) for fn_, args in tasks]
                 # Re-raise the first download error (others are allowed to finish
                 # as the pool shuts down) so the target is recorded as failed.
                 for fut in futures:
