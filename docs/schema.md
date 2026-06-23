@@ -1,6 +1,8 @@
 # ModelSpec Schema Design
 
 > **Status**: the schema described here is implemented in `modelspec/schema/spec.py`, including the M3 `Quantization` discriminated union (GGUF/AWQ/GPTQ) and `MergeSpec`. `adapter` remains a reserved field (`dict | None`, always `null`). Field-level details of quantization/merge are in [quantization-and-merge.md](quantization-and-merge.md).
+>
+> For an evaluation of how well this schema serves downstream tasks (model comparison, production selection, further development, inference-engine config, visualization) and a prioritized list of proposed additions, see [schema-review.md](schema-review.md).
 
 ## Technology choice: Pydantic v2
 
@@ -97,9 +99,12 @@ ModelSpec
 - `per_field: dict[str, FieldProvenance]` — each field's `{source, confidence}`
 - `conflicts: list[Conflict]` — multi-source conflicts archived for human review
 - `warnings: list[str]` — cross-validation warnings (e.g. parameter double-path diff >1%)
+- `not_applicable: list[str]` — dotted paths the model **legitimately lacks** (e.g. `attention.num_kv_heads` under MLA), distinct from merely missing/`None`. Extractors that know a field doesn't apply emit it (see `ExtractorResult.not_applicable`).
 - `raw_config_json: dict | None` — the full original config, hash-archived, never lost
 - `raw_gguf_kv: dict | None`
 - `unknown_fields: list[str]` — fields present in raw but covered by neither canonical nor passthrough (the auto feedback loop)
+
+> **Self-documenting schema**: every field carries a Pydantic `Field(description=...)`, so `model_json_schema()` export includes descriptions (UI tooltips, generated forms).
 
 ## FieldClaim — the connection point between extractor and schema
 

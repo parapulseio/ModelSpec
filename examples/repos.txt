@@ -1,0 +1,16 @@
+# Example targets file for `modelspec batch` / `modelspec coverage`.
+# One target per line: an HF repo id OR a local directory path.
+# `#` starts a comment (full-line or trailing); blank lines are ignored.
+#
+# Usage:
+#   modelspec coverage examples/repos.txt              # HF repos (downloads metadata only)
+#   modelspec coverage examples/repos.txt --limit 2    # sample the first 2
+#   cat examples/repos.txt | modelspec coverage -      # read from stdin
+
+# --- HF repo ids ---
+hf-internal-testing/tiny-random-gpt2
+sshleifer/tiny-gpt2
+
+# --- local directories (run with --offline) ---
+# /data/models/my-merge
+# ./fixtures/tiny-llama

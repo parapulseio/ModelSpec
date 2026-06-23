@@ -135,9 +135,16 @@ class ConfigJsonExtractor:
     def extract(self, source: ExtractionSource) -> ExtractorResult:
         raw = json.loads(source.path("config.json").read_text(encoding="utf-8"))
         claims: list[FieldClaim] = []
+        not_applicable: list[str] = []
+
+        # MLA (DeepSeek style) — detected up front so it takes precedence over the
+        # head-count heuristic and suppresses the (inoperative) kv-head count.
+        is_mla = "kv_lora_rank" in raw or "q_lora_rank" in raw
 
         # --- canonical layer: alias normalization ---
         for canonical_path, candidates in ALIASES.items():
+            if is_mla and canonical_path == "attention.num_kv_heads":
+                continue  # GQA kv-head count is not the operative quantity under MLA
             for name in candidates:
                 if name in raw:
                     claims.append(FieldClaim(canonical_path, raw[name], "config", "high"))
@@ -152,7 +159,11 @@ class ConfigJsonExtractor:
 
         n_heads = raw.get("num_attention_heads")
         n_kv = raw.get("num_key_value_heads")
-        if n_kv is not None and n_heads is not None:
+        if is_mla:
+            claims.append(FieldClaim("attention.type", "mla", "inferred", "high"))
+            tags.append("mla")
+            not_applicable.append("attention.num_kv_heads")
+        elif n_kv is not None and n_heads is not None:
             if n_kv == 1:
                 attn_type, tag = "mqa", "mqa"
             elif n_kv != n_heads:
@@ -161,11 +172,6 @@ class ConfigJsonExtractor:
                 attn_type, tag = "mha", "mha"
             claims.append(FieldClaim("attention.type", attn_type, "inferred", "high"))
             tags.append(tag)
-
-        # MLA (DeepSeek style) overrides the head-count heuristic.
-        if "kv_lora_rank" in raw or "q_lora_rank" in raw:
-            claims.append(FieldClaim("attention.type", "mla", "inferred", "high"))
-            tags.append("mla")
 
         # MoE detection.
         n_experts = raw.get("num_local_experts") or raw.get("num_experts")
@@ -216,4 +222,5 @@ class ConfigJsonExtractor:
             passthrough=passthrough,
             raw=raw,
             unknown_fields=unknown,
+            not_applicable=not_applicable,
         )

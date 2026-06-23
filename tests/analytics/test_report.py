@@ -7,13 +7,19 @@ from modelspec.analytics.report import build_coverage_report
 from modelspec.schema import ModelSpec
 
 
-def _spec(family: str, filled: list[str], unknown: list[str]) -> ModelSpec:
+def _spec(
+    family: str, filled: list[str], unknown: list[str], na: list[str] | None = None
+) -> ModelSpec:
     """Build a spec with a chosen family, filled canonical fields and unknowns."""
     per_field = {p: {"source": "config", "confidence": "high"} for p in filled}
     return ModelSpec.model_validate(
         {
             "architecture": {"family": family},
-            "provenance": {"per_field": per_field, "unknown_fields": unknown},
+            "provenance": {
+                "per_field": per_field,
+                "unknown_fields": unknown,
+                "not_applicable": na or [],
+            },
         }
     )
 
@@ -46,6 +52,30 @@ def test_canonical_fill_rates():
     report = build_coverage_report(_result(specs))
     assert report.canonical_fill_rates["architecture.family"] == 1.0
     assert report.canonical_fill_rates["attention.num_kv_heads"] == 0.5
+
+
+def test_na_excluded_from_fill_denominator():
+    # 1 GQA model with num_kv_heads filled + 1 MLA model where it is N/A.
+    specs = [
+        _spec("llama", ["attention.num_kv_heads"], []),
+        _spec("deepseek_v3", [], [], na=["attention.num_kv_heads"]),
+    ]
+    report = build_coverage_report(_result(specs))
+    # Naive denom would be 1/2 = 50%; over applicable models it is 1/1 = 100%.
+    assert report.canonical_fill_rates["attention.num_kv_heads"] == 1.0
+    assert report.na_counts["attention.num_kv_heads"] == 1
+    # The MLA family's denominator is also reduced -> not counted as a 0% gap.
+    assert report.per_family_fill_rates["deepseek_v3"]["attention.num_kv_heads"] == 0.0
+    assert report.per_family_fill_rates["llama"]["attention.num_kv_heads"] == 1.0
+
+
+def test_all_na_field_renders_without_low_flag():
+    specs = [_spec("deepseek_v3", [], [], na=["attention.num_kv_heads"])]
+    report = build_coverage_report(_result(specs))
+    out = report.render()
+    # Whole corpus N/A for this field -> shown as n/a, no "<-- low" alarm.
+    assert "attention.num_kv_heads  (all 1 N/A)" in out
+    assert "num_kv_heads  <-- low" not in out
 
 
 def test_per_family_breakdown():

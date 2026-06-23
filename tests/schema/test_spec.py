@@ -44,3 +44,21 @@ def test_json_schema_exports():
     schema = ModelSpec.model_json_schema()
     assert schema["title"] == "ModelSpec"
     assert "identity" in schema["properties"]
+
+
+def test_json_schema_has_descriptions():
+    schema = ModelSpec.model_json_schema()
+    # Top-level fields carry descriptions (UI tooltips / self-documenting).
+    assert schema["properties"]["identity"]["description"]
+    # Nested sub-model fields too.
+    attention = schema["$defs"]["Attention"]
+    assert "MLA" in attention["properties"]["num_kv_heads"]["description"]
+
+
+def test_not_applicable_field():
+    spec = ModelSpec.model_validate(
+        {"provenance": {"not_applicable": ["attention.num_kv_heads"]}}
+    )
+    assert spec.provenance.not_applicable == ["attention.num_kv_heads"]
+    # default is empty, distinct from missing
+    assert ModelSpec.model_validate({}).provenance.not_applicable == []

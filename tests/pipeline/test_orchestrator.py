@@ -8,6 +8,23 @@ from modelspec.pipeline import detect_source_format, extract
 from tests.conftest import write_config, write_safetensors_header
 
 
+def test_not_applicable_plumbed_end_to_end(tmp_path: Path):
+    write_config(
+        tmp_path / "config.json",
+        {
+            "architectures": ["DeepseekV3ForCausalLM"],
+            "num_attention_heads": 128,
+            "num_key_value_heads": 128,
+            "kv_lora_rank": 512,
+            "q_lora_rank": 1536,
+        },
+    )
+    spec = extract(str(tmp_path), offline=True)
+    assert spec.attention.type == "mla"
+    assert spec.attention.num_kv_heads is None  # suppressed, not a GQA grouping
+    assert "attention.num_kv_heads" in spec.provenance.not_applicable
+
+
 def test_detect_source_format():
     assert detect_source_format(["config.json", "model.safetensors"]) == "hf"
     assert detect_source_format(["model.gguf"]) == "gguf"

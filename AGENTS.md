@@ -87,6 +87,7 @@ docs/                       # design docs
 - [docs/overview.md](docs/overview.md) — overview, difference vs Stability AI ModelSpec
 - [docs/architecture.md](docs/architecture.md) — architecture, layout, end-to-end flow
 - [docs/schema.md](docs/schema.md) — ModelSpec schema design
+- [docs/schema-review.md](docs/schema-review.md) — schema fitness review (comparison / selection / dev / inference / viz) + proposed additions
 - [docs/extractors.md](docs/extractors.md) — extractors and three-layer extraction
 - [docs/pipeline.md](docs/pipeline.md) — orchestration, merging, cross-validation
 - [docs/quantization-and-merge.md](docs/quantization-and-merge.md) — quantization & merge modeling
