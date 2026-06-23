@@ -44,6 +44,7 @@ The name collides, but the direction is opposite:
 
 - [architecture.md](architecture.md) — system architecture, directory layout, module breakdown
 - [schema.md](schema.md) — `ModelSpec` Pydantic v2 schema design
+- [schema-review.md](schema-review.md) — schema fitness review for downstream tasks + proposed additions
 - [extractors.md](extractors.md) — extractor design and the three-layer extraction strategy
 - [pipeline.md](pipeline.md) — pipeline orchestration, merging, and conflict resolution
 - [quantization-and-merge.md](quantization-and-merge.md) — orthogonal modeling of quantized and merged models

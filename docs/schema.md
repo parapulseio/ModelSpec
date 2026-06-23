@@ -1,6 +1,8 @@
 # ModelSpec Schema Design
 
 > **Status**: the schema described here is implemented in `modelspec/schema/spec.py`, including the M3 `Quantization` discriminated union (GGUF/AWQ/GPTQ) and `MergeSpec`. `adapter` remains a reserved field (`dict | None`, always `null`). Field-level details of quantization/merge are in [quantization-and-merge.md](quantization-and-merge.md).
+>
+> For an evaluation of how well this schema serves downstream tasks (model comparison, production selection, further development, inference-engine config, visualization) and a prioritized list of proposed additions, see [schema-review.md](schema-review.md).
 
 ## Technology choice: Pydantic v2
 
