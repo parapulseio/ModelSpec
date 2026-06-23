@@ -5,6 +5,12 @@ against five intended downstream uses, identifies gaps, and proposes concrete
 additions. It is a **design review**, not an implementation; nothing here is
 wired up yet.
 
+> **Implemented since this review**: finding **D** (per-field `Field(description=...)`,
+> so JSON Schema is self-documenting) and finding **A** (`provenance.not_applicable`
+> for the N/A-vs-missing distinction; the config extractor flags
+> `attention.num_kv_heads` under MLA, which also fixed an MLA-vs-GQA precedence
+> bug). The remaining items below are still proposals.
+
 The five target tasks:
 
 1. **Model comparison** — diff two specs.
@@ -25,7 +31,7 @@ The five target tasks:
 
 ## Cross-cutting findings (affect multiple tasks)
 
-### A. "N/A" vs "missing" are indistinguishable (tasks 1, 2, 5)
+### A. "N/A" vs "missing" are indistinguishable (tasks 1, 2, 5) ✅ done
 
 Every absent value is `None`, whether it is *genuinely not applicable* (DeepSeek
 MLA has no `num_kv_heads`) or *we failed to extract it*. A diff tool, a UI, and
@@ -66,7 +72,7 @@ fields tasks 3 and 4 need most.
 raw → passthrough → canonical workflow (see [analytics.md](analytics.md)). The
 review's wishlist and the M4 feedback loop converge here.
 
-### D. Fields carry no machine-readable descriptions (task 5)
+### D. Fields carry no machine-readable descriptions (task 5) ✅ done
 
 Fields are documented with code comments, so `model_json_schema()` export has no
 `description`. Adding `Field(..., description="...")` gives UI tooltips,
@@ -176,8 +182,8 @@ belong in `ModelSpec`:
 
 ## Suggested sequencing
 
-1. **Low-effort, high-payoff now:** finding D (field descriptions) and finding A
-   (applicability) — both are schema-local, no new extraction.
+1. ~~**Low-effort, high-payoff now:** finding D (field descriptions) and finding A
+   (applicability).~~ ✅ done — both schema-local, no new extraction.
 2. **Data-driven via M4:** run `coverage`, then promote the finding-C fields
    (`intermediate_size`, `head_dim`, `rope_theta`, special tokens, raw
    `architectures` class) as they rank high in `unknown_fields`.

@@ -36,12 +36,15 @@ class ExtractorResult:
     - ``passthrough``: recognized-but-unmapped values, kept verbatim.
     - ``raw``: complete original blob, lossless insurance.
     - ``unknown_fields``: raw keys covered by neither canonical nor passthrough.
+    - ``not_applicable``: dotted paths this model legitimately lacks (e.g.
+      attention.num_kv_heads under MLA) — distinct from merely missing.
     """
 
     claims: list[FieldClaim] = field(default_factory=list)
     passthrough: dict[str, Any] = field(default_factory=dict)
     raw: dict[str, Any] | None = None
     unknown_fields: list[str] = field(default_factory=list)
+    not_applicable: list[str] = field(default_factory=list)
 
 
 @dataclass

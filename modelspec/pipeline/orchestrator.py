@@ -51,6 +51,7 @@ def reshape(
     raw_config: dict | None,
     raw_gguf: dict | None,
     unknown_fields: list[str],
+    not_applicable: list[str],
 ) -> dict[str, Any]:
     """Turn the flat merged fields into the nested ModelSpec-shaped dict."""
     tree: dict[str, Any] = {}
@@ -67,6 +68,7 @@ def reshape(
         "per_field": per_field,
         "conflicts": merged.conflicts,
         "warnings": [],
+        "not_applicable": sorted(set(not_applicable)),
         "raw_config_json": raw_config,
         "raw_gguf_kv": raw_gguf,
         "unknown_fields": sorted(set(unknown_fields)),
@@ -82,10 +84,12 @@ def extract_from_source(source: ExtractionSource) -> ModelSpec:
     raw_config: dict | None = None
     raw_gguf: dict | None = None
     unknown_fields: list[str] = []
+    not_applicable: list[str] = []
     for ext in extractors:
         result = ext.extract(source)
         all_claims.extend(result.claims)
         unknown_fields.extend(result.unknown_fields)
+        not_applicable.extend(result.not_applicable)
         if ext.name == "config_json":
             raw_config = result.raw
         elif ext.name == "gguf":
@@ -99,6 +103,7 @@ def extract_from_source(source: ExtractionSource) -> ModelSpec:
         raw_config=raw_config,
         raw_gguf=raw_gguf,
         unknown_fields=unknown_fields,
+        not_applicable=not_applicable,
     )
     # Pydantic's entry-point validation — the first time the schema is touched.
     spec = ModelSpec.model_validate(tree)

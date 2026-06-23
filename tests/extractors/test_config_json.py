@@ -63,6 +63,25 @@ def test_mla_overrides(tmp_path: Path):
     assert claims["attention.type"] == "mla"
 
 
+def test_mla_wins_over_gqa_and_marks_kv_heads_na(tmp_path: Path):
+    # A realistic DeepSeek config has heads AND lora ranks: MLA must win, and
+    # num_kv_heads must be flagged N/A rather than carried as a GQA grouping.
+    cfg = {
+        "architectures": ["DeepseekV3ForCausalLM"],
+        "num_attention_heads": 128,
+        "num_key_value_heads": 128,
+        "kv_lora_rank": 512,
+        "q_lora_rank": 1536,
+    }
+    write_config(tmp_path / "config.json", cfg)
+    src = ExtractionSource(root=tmp_path, repo_files=["config.json"])
+    result = ConfigJsonExtractor().extract(src)
+    by_path = {c.field_path: c.value for c in result.claims}
+    assert by_path["attention.type"] == "mla"  # not gqa
+    assert "attention.num_kv_heads" not in by_path  # value suppressed
+    assert "attention.num_kv_heads" in result.not_applicable
+
+
 def test_unknown_fields_reported(tmp_path: Path):
     cfg = {"architectures": ["LlamaForCausalLM"], "num_hidden_layers": 2, "enable_my_custom_thing": True}
     _, result = _claims(tmp_path, cfg)
