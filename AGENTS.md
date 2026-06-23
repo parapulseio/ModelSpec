@@ -35,7 +35,7 @@ docs/                       # design docs
 
 ## Key constraints (violating these causes bugs)
 
-- **Never download weights** — safetensors uses an HTTP Range request for the header only (the first 8 bytes give the JSON length); GGUF uses the `gguf` package to read the KV without loading tensors.
+- **Never download weights** — safetensors uses an HTTP Range request for the header only (the first 8 bytes give the JSON length); GGUF is parsed by our own binary header reader (`parse_gguf_header`), never `gguf.GGUFReader` (which builds numpy views over tensor *data* and crashes on the truncated metadata-only prefix). The `gguf` package is used only for its type/size data tables.
 - **Sharded safetensors must read `model.safetensors.index.json` first** and aggregate all shards, otherwise the parameter count comes out half.
 - **Look up quantized byte sizes in the ggml_type table**, do not use bits/8. Q4_K_M is actually ~4.83 bpw (an average, summed from the tensor list).
 - **MoE shared experts are always active** — do not subtract them from active.

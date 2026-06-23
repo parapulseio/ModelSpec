@@ -163,15 +163,21 @@ class ConfigJsonExtractor:
             claims.append(FieldClaim("attention.type", "mla", "inferred", "high"))
             tags.append("mla")
             not_applicable.append("attention.num_kv_heads")
-        elif n_kv is not None and n_heads is not None:
-            if n_kv == 1:
+        elif n_heads is not None:
+            # A missing num_key_value_heads means MHA (kv heads == query heads):
+            # the HF default. Infer it so MHA models aren't left without an
+            # attention.type / num_kv_heads.
+            kv = n_kv if n_kv is not None else n_heads
+            if kv == 1:
                 attn_type, tag = "mqa", "mqa"
-            elif n_kv != n_heads:
+            elif kv != n_heads:
                 attn_type, tag = "gqa", "gqa"
             else:
                 attn_type, tag = "mha", "mha"
             claims.append(FieldClaim("attention.type", attn_type, "inferred", "high"))
             tags.append(tag)
+            if n_kv is None:
+                claims.append(FieldClaim("attention.num_kv_heads", n_heads, "inferred", "high"))
 
         # MoE detection.
         n_experts = raw.get("num_local_experts") or raw.get("num_experts")

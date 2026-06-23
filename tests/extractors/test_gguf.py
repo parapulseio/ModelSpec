@@ -20,6 +20,34 @@ def _claims(tmp_path: Path, kv: dict, tensors: dict):
     return {c.field_path: c.value for c in result.claims}, result
 
 
+def test_truncated_gguf_prefix_still_parses(tmp_path: Path):
+    # The remote path downloads only a ~24MB prefix (header + tensor infos, no
+    # data). GGUFReader chokes on that ("cannot reshape ..."); our own parser
+    # must succeed because it never touches tensor data.
+    full = tmp_path / "model.gguf"
+    write_gguf(
+        full,
+        kv={"general.architecture": "llama", "llama.block_count": 4},
+        # one big F32 tensor so the data section dominates the file size
+        tensors={"token_embd.weight": ([512, 8], "F32")},
+    )
+    raw = full.read_bytes()
+    truncated = tmp_path / "trunc.gguf"
+    truncated.write_bytes(raw[:400])  # keep header + tensor info, cut the data
+
+    # The old approach (GGUFReader) would raise on this truncated file.
+    from gguf import GGUFReader
+
+    with pytest.raises(Exception):
+        GGUFReader(truncated)
+
+    src = ExtractionSource(root=tmp_path, repo_files=["trunc.gguf"])
+    claims = {c.field_path: c.value for c in GGUFExtractor().extract(src).claims}
+    assert claims["architecture.family"] == "llama"
+    assert claims["architecture.num_layers"] == 4
+    assert claims["parameters.total"] == 512 * 8  # tensor info parsed, data skipped
+
+
 def test_llama_gguf_basic(tmp_path: Path):
     claims, result = _claims(
         tmp_path,

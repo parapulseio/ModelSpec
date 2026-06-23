@@ -43,6 +43,15 @@ def test_alias_gpt2_style(tmp_path: Path):
     assert claims["context.declared"] == 1024
 
 
+def test_mha_inferred_when_kv_heads_absent(tmp_path: Path):
+    # Many configs omit num_key_value_heads (== MHA). We must still infer the
+    # attention type and fill num_kv_heads from the query head count.
+    cfg = {"architectures": ["GPTNeoXForCausalLM"], "num_attention_heads": 16}
+    claims, _ = _claims(tmp_path, cfg)
+    assert claims["attention.type"] == "mha"
+    assert claims["attention.num_kv_heads"] == 16  # inferred = query heads
+
+
 def test_moe_detection(tmp_path: Path):
     cfg = {
         "architectures": ["MixtralForCausalLM"],

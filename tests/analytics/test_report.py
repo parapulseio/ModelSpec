@@ -89,6 +89,35 @@ def test_per_family_breakdown():
     assert report.per_family_fill_rates["deepseek_v3"]["attention.num_kv_heads"] == 0.0
 
 
+def test_conflict_field_histogram():
+    def with_conflicts(conflicts):
+        return ModelSpec.model_validate({"provenance": {"conflicts": conflicts}})
+
+    vocab_conflict = {
+        "field_path": "tokenizer.vocab_size", "value": 1000, "source": "config",
+        "confidence": "high", "winner_source": "tensors", "winner_value": 1001,
+    }
+    ctx_conflict = {
+        "field_path": "context.declared", "value": 4096, "source": "gguf",
+        "confidence": "low", "winner_source": "config", "winner_value": 131072,
+    }
+    specs = [
+        with_conflicts([vocab_conflict]),
+        with_conflicts([vocab_conflict]),
+        with_conflicts([ctx_conflict]),
+    ]
+    report = build_coverage_report(_result(specs))
+
+    freq = {f: (c, p) for f, c, p in report.conflict_field_frequency}
+    assert freq["tokenizer.vocab_size"] == (2, round(2 / 3, 4))
+    assert freq["context.declared"][0] == 1
+    # the dominant disagreeing source pair is surfaced
+    assert report.conflict_sources["tokenizer.vocab_size"] == "tensors vs config"
+    out = report.render()
+    assert "conflict fields" in out
+    assert "tokenizer.vocab_size" in out and "tensors vs config" in out
+
+
 def test_failures_included():
     result = BatchResult(
         items=[

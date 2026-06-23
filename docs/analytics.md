@@ -114,4 +114,10 @@ canonical fill rates (over applicable models):
 per-family fill rates (family: n):
   llama (n=18020): family=100%  num_kv_heads=99%  ...
   deepseek_v3 (n=210): family=100%  num_kv_heads=0%  ...   # MLA: N/A, not a missed extraction
+
+conflict fields (top 20, which sources disagree):
+  12.1%    4310  tokenizer.vocab_size  (tensors vs config)   # which sources disagreed, and how often
+   3.4%    1210  context.declared  (gguf vs config)
 ```
+
+The **conflict-field histogram** (`conflict_field_frequency` in JSON) shows, per field path, how many models had a multi-source disagreement and the dominant `winner vs loser` source pair — telling you *where* sources fight and *which* sources to trust. (Note: extractors that read different files but share a `source` label, e.g. config.json and tokenizer.json both labelled `config`, show up as `config vs config`; finer source labels are a possible follow-up.)

@@ -64,8 +64,9 @@ ALIASES = {
 ### Feature inference
 
 - `num_local_experts` / `num_experts` present → `architecture.is_moe = True`
-- `num_key_value_heads != num_attention_heads` → `attention.type = "gqa"` (source=`inferred`)
-- `q_lora_rank` / `kv_lora_rank` → MLA
+- `num_key_value_heads != num_attention_heads` → `attention.type = "gqa"` (source=`inferred`); `== 1` → `mqa`; `== num_attention_heads` → `mha`
+- **`num_key_value_heads` absent but `num_attention_heads` present → `mha` default**, and `num_kv_heads` is inferred to equal the query head count (many configs omit it for MHA)
+- `q_lora_rank` / `kv_lora_rank` → MLA (takes precedence; `num_kv_heads` is flagged `not_applicable`)
 - `sliding_window` → local attention
 - `rope_scaling.type` → yarn / ntk / dynamic / linear
 
@@ -94,20 +95,19 @@ Outputs:
 
 ## gguf extractor
 
-Use the `gguf` Python package (official llama.cpp) to read the KV header without loading weights:
+**We parse the GGUF v2/v3 binary header ourselves** (`parse_gguf_header`) and do **not** use `gguf.GGUFReader`. GGUFReader eagerly builds numpy views over every tensor's *data*, which (a) lives past the metadata-only prefix we download remotely — raising `cannot reshape array ...` on the truncated file — and (b) is gigabytes for a local file. Our parser reads only the leading bytes (magic, version, KV pairs, tensor infos) by streaming from the file, and never touches data. The `gguf` package is still an optional dependency, used only for its pure data tables (type names, block sizes, the file-type enum).
 
-```python
-from gguf import GGUFReader
-r = GGUFReader(path)
-arch = r.fields["general.architecture"].parts[-1].tobytes().decode()
-n_ctx = int(r.fields[f"{arch}.context_length"].parts[-1][0])
-n_expert = r.fields.get(f"{arch}.expert_count")   # present => MoE
-file_type = r.fields["general.file_type"]         # quantization-level enum
+```
+GGUF header layout (little-endian), read in order, stop after tensor infos:
+  "GGUF" | version(u32) | tensor_count(u64) | kv_count(u64)
+  kv_count × { key:str | value_type:u32 | value }      # arrays kept as a length marker
+  tensor_count × { name:str | n_dims:u32 | dims:u64[] | ggml_type:u32 | offset:u64 }
+  -- tensor DATA follows here and is never read --
 ```
 
-- Parameter count: `sum(prod(t.shape) for t in r.tensors)`
-- Byte size: look up the `ggml_type_size` / `blck_size` table per tensor type — **Q4_K_M is not 4 bits/param**; block quantization is easy to miscalculate
-- canonical normalizes known keys, all unknown `general.*` / `{arch}.*` keys go to passthrough, and the full KV dump goes to raw
+- Parameter count: `sum(prod(dims) for each tensor info)`
+- Bits-per-weight: look up `GGML_QUANT_SIZES` (block_elements, block_bytes) per tensor type — **Q4_K_M is ~4.83 bpw, not 4** — and average over all weights
+- canonical normalizes known `{arch}.*` keys; `general.*` keys go to passthrough; the compact KV dump (arrays folded to `{"_array_len": n}`) goes to raw
 
 ## license extractor (three-tier identification)
 

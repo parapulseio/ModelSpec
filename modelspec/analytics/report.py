@@ -64,6 +64,11 @@ class CoverageReport:
     family_counts: dict[str, int] = field(default_factory=dict)
     models_with_warnings: int = 0
     models_with_conflicts: int = 0
+    # Histogram of which fields conflict across sources: per field path, the
+    # number of models with a conflict on it + the dominant "winner vs loser"
+    # source pair (which sources disagree). Drives where to invest.
+    conflict_field_frequency: list[tuple[str, int, float]] = field(default_factory=list)
+    conflict_sources: dict[str, str] = field(default_factory=dict)
 
     def to_dict(self) -> dict:
         return {
@@ -84,6 +89,10 @@ class CoverageReport:
             "family_counts": self.family_counts,
             "models_with_warnings": self.models_with_warnings,
             "models_with_conflicts": self.models_with_conflicts,
+            "conflict_field_frequency": [
+                {"field": f, "count": c, "pct": p, "sources": self.conflict_sources.get(f, "")}
+                for f, c, p in self.conflict_field_frequency
+            ],
         }
 
     def render(self, *, full: bool = True, top_n: int = 20) -> str:
@@ -141,6 +150,15 @@ class CoverageReport:
                         f"{p.split('.')[-1]}={rates.get(p, 0.0):.0%}" for p in CANONICAL_FIELDS
                     )
                     lines.append(f"  {fam} (n={n}): {cells}")
+
+            lines.append("")
+            lines.append(f"conflict fields (top {top_n}, which sources disagree):")
+            if self.conflict_field_frequency:
+                for f, c, p in self.conflict_field_frequency[:top_n]:
+                    pair = self.conflict_sources.get(f, "")
+                    lines.append(f"  {p:6.1%}  {c:>6}  {f}  ({pair})")
+            else:
+                lines.append("  (none)")
 
         if self.failures:
             lines.append("")
@@ -209,9 +227,29 @@ def build_coverage_report(
         for fam, counter in family_filled.items()
     }
 
-    # --- conflict / warning prevalence ---
+    # --- conflict / warning prevalence + the conflict-field histogram ---
     with_warnings = sum(1 for s in specs if s.provenance.warnings)
     with_conflicts = sum(1 for s in specs if s.provenance.conflicts)
+
+    # Count distinct models per conflicting field, and which source pair
+    # ("winner vs loser") disagrees most often for that field.
+    conflict_counter: Counter[str] = Counter()
+    conflict_pairs: dict[str, Counter[str]] = {}
+    for spec in specs:
+        seen: set[str] = set()
+        for c in spec.provenance.conflicts:
+            if c.field_path not in seen:
+                conflict_counter[c.field_path] += 1
+                seen.add(c.field_path)
+            conflict_pairs.setdefault(c.field_path, Counter())[
+                f"{c.winner_source} vs {c.source}"
+            ] += 1
+    conflict_freq = [
+        (fieldname, count, _pct(count, n)) for fieldname, count in conflict_counter.most_common()
+    ]
+    conflict_sources = {
+        fieldname: pairs.most_common(1)[0][0] for fieldname, pairs in conflict_pairs.items()
+    }
 
     return CoverageReport(
         total=result.total,
@@ -226,4 +264,6 @@ def build_coverage_report(
         family_counts=dict(family_counts),
         models_with_warnings=with_warnings,
         models_with_conflicts=with_conflicts,
+        conflict_field_frequency=conflict_freq,
+        conflict_sources=conflict_sources,
     )
