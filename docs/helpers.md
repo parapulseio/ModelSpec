@@ -63,4 +63,4 @@ big_llama_quants = list(
 `field_catalog()` flattens the live schema (descriptions, types, Literal choices)
 into dotted-path `FieldDoc` entries; `explain_field(query)` does the fuzzy lookup
 used by `modelspec explain`. There is no second copy of the docs — it introspects
-the `description=` already on every field. See [cli.md](cli.md#explain--field-documentation-m5).
+the `description=` already on every field. See [cli.md](cli.md#explain-field-documentation-m5).
