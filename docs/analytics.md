@@ -23,6 +23,7 @@ modelspec/analytics/
 - **`run_batch(targets, *, offline, revision, max_workers, limit, on_progress, target_timeout)`** → `BatchResult`
   - IO-bound (metadata downloads), runs targets concurrently in daemon threads; **a single target's failure is recorded and never aborts the batch**.
   - **Per-target timeout** (`target_timeout`, default 120s): a slow / huge / hung repo — e.g. a 685B model whose 160+ shard headers are fetched sequentially — is abandoned and recorded as a `TimeoutError` failure, so it can't stall the whole run. Set a HF token (`HF_TOKEN`) to avoid rate-limit slowdowns.
+  - **Auth advisory**: HF attaches a `Warning` header to anonymous requests ("You are sending unauthenticated requests …") that huggingface_hub re-logs; the CLI raises the hub logger to ERROR so this advisory doesn't flood the dashboard. It is harmless — extraction still succeeds. Export a valid `HF_TOKEN` to actually speed up the underlying downloads.
   - Results preserve order; `BatchResult` exposes `specs` / `failures` / `succeeded` / `failed` / `total`.
 - **`build_coverage_report(result, *, promotion_threshold=0.10, top_n=20)`** → `CoverageReport`
   - Aggregated entirely from `provenance`, **no re-download**.

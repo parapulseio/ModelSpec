@@ -211,9 +211,29 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _quiet_hf_advisory() -> None:
+    """Silence huggingface_hub's per-request advisory log lines.
+
+    The HF server attaches a ``Warning`` header to anonymous requests, which
+    huggingface_hub re-logs ("You are sending unauthenticated requests ...").
+    At corpus scale this floods the dashboard; our own findings go through
+    provenance, not the hub logger, so raising its level loses nothing useful.
+    Authenticate (HF_TOKEN) to make the underlying requests faster regardless.
+    """
+    try:
+        from huggingface_hub.utils import logging as _hf_logging
+
+        _hf_logging.set_verbosity_error()
+    except Exception:  # pragma: no cover - older/newer hub layouts
+        import logging
+
+        logging.getLogger("huggingface_hub").setLevel(logging.ERROR)
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
+    _quiet_hf_advisory()
     return args.func(args)
 
 

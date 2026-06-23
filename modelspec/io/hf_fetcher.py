@@ -57,18 +57,14 @@ _GGUF_PREFIX = 24 * 1024 * 1024  # 24 MB
 _SAFETENSORS_HEADER_CAP = 256 * 1024 * 1024  # 256 MB
 
 
-def _list_repo_files(repo_id: str, revision: str | None) -> list[str]:
-    from huggingface_hub import HfApi
+def _resolve_token() -> str | None:
+    """Resolve the HF token explicitly (env first, then the stored token).
 
-    return HfApi().list_repo_files(repo_id, revision=revision)
-
-
-def _make_session():
-    """A requests session carrying the HF token if one is available."""
-    import requests
-
-    session = requests.Session()
-    token = os.environ.get("HF_TOKEN")
+    We pass this token into every huggingface_hub call rather than relying on
+    implicit env detection, which varies across hub versions and is the usual
+    cause of the "unauthenticated requests" warning despite HF_TOKEN being set.
+    """
+    token = os.environ.get("HF_TOKEN") or os.environ.get("HUGGING_FACE_HUB_TOKEN")
     if not token:
         try:
             from huggingface_hub import get_token
@@ -76,6 +72,21 @@ def _make_session():
             token = get_token()
         except Exception:  # pragma: no cover - older hub versions
             token = None
+    return token or None
+
+
+def _list_repo_files(repo_id: str, revision: str | None) -> list[str]:
+    from huggingface_hub import HfApi
+
+    return HfApi(token=_resolve_token()).list_repo_files(repo_id, revision=revision)
+
+
+def _make_session():
+    """A requests session carrying the HF token if one is available."""
+    import requests
+
+    session = requests.Session()
+    token = _resolve_token()
     if token:
         session.headers["Authorization"] = f"Bearer {token}"
     return session
@@ -104,7 +115,7 @@ def _read_prefix(session, url: str, length: int, timeout: int) -> bytes:
 def _download_full(repo_id: str, filename: str, revision: str | None, dest_dir: Path) -> None:
     from huggingface_hub import hf_hub_download
 
-    cached = hf_hub_download(repo_id, filename, revision=revision)
+    cached = hf_hub_download(repo_id, filename, revision=revision, token=_resolve_token())
     target = dest_dir / filename
     target.parent.mkdir(parents=True, exist_ok=True)
     shutil.copyfile(cached, target)
