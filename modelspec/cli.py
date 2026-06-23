@@ -74,6 +74,92 @@ def _cmd_schema(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_explain(args: argparse.Namespace) -> int:
+    from modelspec.explain import explain_field, field_catalog
+
+    if not args.field:
+        docs = field_catalog()  # list every field
+    else:
+        docs = explain_field(args.field)
+        if not docs:
+            print(f"error: no field matching {args.field!r}", file=sys.stderr)
+            print("       run 'modelspec explain' to list all fields", file=sys.stderr)
+            return 2
+
+    if args.format == "json":
+        print(json.dumps([vars(d) for d in docs], indent=2, ensure_ascii=False))
+        return 0
+
+    for d in docs:
+        print(f"{d.path}")
+        print(f"  type: {d.type_str}")
+        if d.choices:
+            print(f"  choices: {', '.join(d.choices)}")
+        if d.description:
+            print(f"  {d.description}")
+        print()
+    return 0
+
+
+_COMPLETIONS = {
+    "bash": """\
+# modelspec bash completion — add to ~/.bashrc:
+#   source <(modelspec completion bash)
+_modelspec_complete() {
+    local cur prev words cword
+    _init_completion 2>/dev/null || { cur="${COMP_WORDS[COMP_CWORD]}"; }
+    local cmds="extract schema batch coverage explain completion"
+    if [ "$COMP_CWORD" -eq 1 ]; then
+        COMPREPLY=( $(compgen -W "$cmds --help --version" -- "$cur") )
+        return
+    fi
+    case "${COMP_WORDS[1]}" in
+        extract) COMPREPLY=( $(compgen -W "--format -o --output --offline --revision --show-provenance --strict" -- "$cur") );;
+        batch|coverage) COMPREPLY=( $(compgen -W "--offline --revision --workers --limit --target-timeout --format --top --quiet --output-dir" -- "$cur") );;
+        explain) COMPREPLY=( $(compgen -W "--format" -- "$cur") );;
+        completion) COMPREPLY=( $(compgen -W "bash zsh fish" -- "$cur") );;
+    esac
+}
+complete -F _modelspec_complete modelspec
+""",
+    "zsh": """\
+# modelspec zsh completion — add to ~/.zshrc:
+#   source <(modelspec completion zsh)
+_modelspec() {
+    local -a cmds
+    cmds=(extract schema batch coverage explain completion)
+    if (( CURRENT == 2 )); then
+        compadd -- $cmds --help --version
+        return
+    fi
+    case $words[2] in
+        extract) compadd -- --format -o --output --offline --revision --show-provenance --strict;;
+        batch|coverage) compadd -- --offline --revision --workers --limit --target-timeout --format --top --quiet --output-dir;;
+        explain) compadd -- --format;;
+        completion) compadd -- bash zsh fish;;
+    esac
+}
+compdef _modelspec modelspec
+""",
+    "fish": """\
+# modelspec fish completion — add to ~/.config/fish/completions/modelspec.fish:
+#   modelspec completion fish > ~/.config/fish/completions/modelspec.fish
+complete -c modelspec -f
+complete -c modelspec -n __fish_use_subcommand -a extract -d 'extract a ModelSpec'
+complete -c modelspec -n __fish_use_subcommand -a schema -d 'print the JSON Schema'
+complete -c modelspec -n __fish_use_subcommand -a batch -d 'batch extract + report'
+complete -c modelspec -n __fish_use_subcommand -a coverage -d 'coverage dashboard'
+complete -c modelspec -n __fish_use_subcommand -a explain -d 'explain a schema field'
+complete -c modelspec -n __fish_use_subcommand -a completion -d 'print a shell completion script'
+""",
+}
+
+
+def _cmd_completion(args: argparse.Namespace) -> int:
+    print(_COMPLETIONS[args.shell], end="")
+    return 0
+
+
 def _progress_printer(done: int, total: int) -> None:
     print(f"\r  extracting {done}/{total} ...", end="", file=sys.stderr, flush=True)
     if done == total:
@@ -170,15 +256,50 @@ def _add_batch_options(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--quiet", action="store_true", help="suppress the progress line")
 
 
+_EXAMPLES = """\
+examples:
+  # extract one model from the HF Hub (metadata only, no weights downloaded)
+  modelspec extract meta-llama/Llama-3.1-8B-Instruct
+
+  # a GGUF repo, as YAML, written to a file
+  modelspec extract TheBloke/Mistral-7B-v0.1-GGUF --format yaml -o spec.yaml
+
+  # a local directory, offline, failing CI on any cross-field warning
+  modelspec extract ./models/my-model --offline --strict
+
+  # batch a corpus and see which raw keys are still uncovered
+  modelspec batch repos.txt --top 30
+
+  # what does a field mean? (fuzzy: bare leaf names work too)
+  modelspec explain effective
+  modelspec explain attention.num_kv_heads
+
+  # install tab-completion for your shell
+  source <(modelspec completion bash)
+"""
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="modelspec",
-        description="Extract and normalize LLM model specifications.",
+        description="Extract and normalize LLM model specifications from their "
+        "metadata sources (config.json / safetensors / GGUF / license / "
+        "tokenizer) — without downloading weights.",
+        epilog=_EXAMPLES,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument("--version", action="version", version=f"modelspec {__version__}")
-    sub = parser.add_subparsers(dest="command", required=True)
+    sub = parser.add_subparsers(dest="command", required=True, metavar="<command>")
 
-    p_extract = sub.add_parser("extract", help="extract a ModelSpec from a repo id or local dir")
+    p_extract = sub.add_parser(
+        "extract",
+        help="extract a ModelSpec from a repo id or local dir",
+        description="Download a model's metadata and emit a normalized ModelSpec.",
+        epilog="examples:\n"
+        "  modelspec extract meta-llama/Llama-3.1-8B-Instruct\n"
+        "  modelspec extract ./local/dir --offline --show-provenance\n",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
     p_extract.add_argument("repo_id", help="HF repo id (e.g. meta-llama/Llama-3.1-8B) or local path")
     p_extract.add_argument("--format", choices=["json", "yaml"], default="json")
     p_extract.add_argument("-o", "--output", help="write to file instead of stdout")
@@ -207,6 +328,33 @@ def build_parser() -> argparse.ArgumentParser:
     )
     _add_batch_options(p_coverage)
     p_coverage.set_defaults(func=_cmd_coverage)
+
+    p_explain = sub.add_parser(
+        "explain",
+        help="explain what a ModelSpec field means",
+        description="Print the type, allowed values and description of a schema "
+        "field. With no FIELD, list every field. Matching is fuzzy: an exact "
+        "dotted path wins, else a bare leaf name, else any substring.",
+        epilog="examples:\n"
+        "  modelspec explain effective_context\n"
+        "  modelspec explain quant\n",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    p_explain.add_argument("field", nargs="?", help="dotted path or name fragment (omit to list all)")
+    p_explain.add_argument("--format", choices=["text", "json"], default="text")
+    p_explain.set_defaults(func=_cmd_explain)
+
+    p_completion = sub.add_parser(
+        "completion",
+        help="print a shell tab-completion script",
+        description="Emit a completion script for the given shell to stdout.",
+        epilog="examples:\n"
+        "  source <(modelspec completion bash)\n"
+        "  modelspec completion fish > ~/.config/fish/completions/modelspec.fish\n",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    p_completion.add_argument("shell", choices=["bash", "zsh", "fish"])
+    p_completion.set_defaults(func=_cmd_completion)
 
     return parser
 
