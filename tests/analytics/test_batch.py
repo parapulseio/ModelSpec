@@ -79,6 +79,20 @@ def test_target_timeout_records_failure(monkeypatch, tmp_path: Path):
     assert "TimeoutError" in result.failures[0].error
 
 
+def test_delay_throttles_and_preserves_results(tmp_path: Path):
+    for n in ("a", "b", "c"):
+        _make_model(tmp_path / n)
+    targets = [str(tmp_path / n) for n in ("a", "b", "c")]
+
+    t0 = time.monotonic()
+    result = run_batch(targets, offline=True, max_workers=8, delay=0.05)
+    elapsed = time.monotonic() - t0
+
+    assert result.succeeded == 3
+    # 3 targets in one wave => 2 inter-start gaps of 0.05s = ~0.1s of throttle.
+    assert elapsed >= 0.08
+
+
 def test_read_targets_skips_comments_and_blanks(tmp_path: Path):
     f = tmp_path / "targets.txt"
     f.write_text("# header\n\norg/model-a\norg/model-b  # inline\n\n", encoding="utf-8")

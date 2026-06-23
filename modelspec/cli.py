@@ -98,6 +98,7 @@ def _run_batch_from_args(args: argparse.Namespace):
         limit=args.limit,
         on_progress=progress,
         target_timeout=args.target_timeout,
+        delay=args.delay,
     )
 
 
@@ -164,6 +165,12 @@ def _add_batch_options(parser: argparse.ArgumentParser) -> None:
         type=float,
         default=120.0,
         help="per-target seconds budget; slow/hung targets are recorded as failures (0 = no limit)",
+    )
+    parser.add_argument(
+        "--delay",
+        type=float,
+        default=0.0,
+        help="seconds to wait between starting each target, to throttle the Hub request rate",
     )
     parser.add_argument("--format", choices=["text", "json"], default="text")
     parser.add_argument("--top", type=int, default=20, help="rows for unknown_fields tables")

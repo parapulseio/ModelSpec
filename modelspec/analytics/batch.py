@@ -96,6 +96,7 @@ def run_batch(
     limit: int | None = None,
     on_progress: Callable[[int, int], None] | None = None,
     target_timeout: float | None = DEFAULT_TARGET_TIMEOUT,
+    delay: float = 0.0,
 ) -> BatchResult:
     """Extract every target concurrently and collect the outcomes.
 
@@ -105,6 +106,10 @@ def run_batch(
     recorded as a ``TimeoutError`` failure and the batch moves on (the daemon
     thread, if still doing network IO, won't block process exit). Pass
     ``target_timeout=None`` (or <= 0) to disable the timeout.
+
+    ``delay`` (seconds) staggers the start of each target, throttling the request
+    rate to the Hub to avoid rate-limiting (429s) — independent of, and on top
+    of, the global download concurrency cap.
     """
     targets = list(targets)
     if limit is not None:
@@ -130,7 +135,10 @@ def run_batch(
             (idx, target, threading.Thread(target=_worker, args=(idx, target), daemon=True))
             for idx, target in wave
         ]
-        for _, _, th in threads:
+        for i, (_, _, th) in enumerate(threads):
+            # Stagger starts by `delay` to throttle the Hub request rate.
+            if delay > 0 and (start > 0 or i > 0):
+                time.sleep(delay)
             th.start()
         deadline = time.monotonic() + budget if budget else None
         for idx, target, th in threads:

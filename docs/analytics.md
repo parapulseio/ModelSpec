@@ -74,6 +74,7 @@ TheBloke/Mistral-7B-v0.1-GGUF      # a GGUF repo
 | `--workers N` | concurrent extractions (default 8) |
 | `--limit N` | process only the first N (sampling) |
 | `--target-timeout S` | per-target seconds budget (default 120); a slow/hung repo is recorded as a `TimeoutError` failure instead of stalling the batch. `0` disables it. |
+| `--delay S` | seconds to wait between starting each target (default 0), throttling the Hub request rate to avoid 429s — on top of the global download concurrency cap. |
 | `--format text\|json` | output format (default: the text dashboard) |
 | `--top N` | rows in the frequency tables (default 20) |
 | `--quiet` | suppress the stderr progress line |
