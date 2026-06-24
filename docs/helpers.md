@@ -22,6 +22,9 @@ All are pure projections of already-validated state — they never raise, never 
 | `spec.is_moe()` | `bool` | `moe` present |
 | `spec.is_adapter()` | `bool` | `adapter` present (reserved) |
 | `spec.is_derived()` | `bool` | has `identity.lineage.base_models` |
+| `spec.is_decoder_only()` | `bool` | has the `decoder-only` tag (incl. a VLM's LM) |
+| `spec.is_multimodal()` | `bool` | has a vision/audio component (a VLM) |
+| `spec.modality` | `str` | coarse kind: `multimodal` / `audio` / `vision` / `encoder` / `seq2seq` / `decoder-only` / `unknown` |
 | `spec.quant_format` | `str \| None` | the union discriminator: `gguf` / `awq` / `gptq` |
 | `spec.bits_per_weight` | `float \| None` | GGUF measured avg, else AWQ/GPTQ nominal bits |
 | `spec.effective_context` | `int \| None` | `effective` → `declared` → `trained` fallback |
@@ -45,8 +48,8 @@ print(spec.source_of("architecture.family"))           # config
 For *collections* of specs. Predicates are plain `Callable[[ModelSpec], bool]`,
 so anything with that shape composes — no base class required.
 
-- Bare predicates: `is_quantized`, `is_merged`, `is_moe`, `is_dense`, `is_adapter`, `is_derived`, `commercial_use_allowed`.
-- Factories (call to bind): `family_is(*names)`, `quant_format_in(*formats)`, `min_params(n)`, `max_params(n)`, `min_context(n)`, `license_is(*spdx_ids)`. Numeric predicates exclude unknown values.
+- Bare predicates: `is_quantized`, `is_merged`, `is_moe`, `is_dense`, `is_adapter`, `is_derived`, `is_decoder_only`, `is_multimodal`, `has_chat_template`, `commercial_use_allowed`.
+- Factories (call to bind): `family_is(*names)`, `quant_format_in(*formats)`, `modality_is(*kinds)`, `min_params(n)`, `max_params(n)`, `min_context(n)`, `license_is(*spdx_ids)`. Numeric predicates exclude unknown values; `modality_is` keeps non-decoder models (audio/vision/encoder/seq2seq) out of an LLM query.
 - Combinators: `all_of(*p)`, `any_of(*p)`, `negate(p)`.
 - Driver: `filter_specs(specs, *predicates)` — yields specs satisfying *all* predicates (implicit AND).
 

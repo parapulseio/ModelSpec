@@ -350,6 +350,28 @@ class ModelSpec(_Model):
         """True if this model declares any upstream base model (lineage)."""
         return bool(self.identity.lineage and self.identity.lineage.base_models)
 
+    def is_decoder_only(self) -> bool:
+        """True for decoder-only (causal-LM) models, incl. the LM part of a VLM."""
+        return "decoder-only" in self.architecture.tags
+
+    def is_multimodal(self) -> bool:
+        """True if the model carries a vision / audio component (a VLM)."""
+        return "multimodal" in self.architecture.tags
+
+    @property
+    def modality(self) -> str:
+        """Coarse model kind from the architecture tags.
+
+        One of: ``multimodal`` / ``audio`` / ``vision`` / ``encoder`` /
+        ``seq2seq`` / ``decoder-only`` / ``unknown`` (most specific first).
+        Lets consumers filter out non-decoder models (see modelspec.query).
+        """
+        tags = self.architecture.tags
+        for kind in ("multimodal", "audio", "vision", "encoder", "seq2seq"):
+            if kind in tags:
+                return kind
+        return "decoder-only" if "decoder-only" in tags else "unknown"
+
     @property
     def quant_format(self) -> Optional[str]:
         """The quantization format discriminator (``gguf`` / ``awq`` / ``gptq``), or None."""

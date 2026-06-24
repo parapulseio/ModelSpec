@@ -31,6 +31,24 @@ def test_quant_helpers_awq_bits_coerced_to_float():
     assert spec.bits_per_weight == 4.0
 
 
+def test_modality_helpers():
+    llm = ModelSpec.model_validate({"architecture": {"tags": ["decoder-only", "gqa"]}})
+    assert llm.is_decoder_only() and not llm.is_multimodal()
+    assert llm.modality == "decoder-only"
+
+    vlm = ModelSpec.model_validate(
+        {"architecture": {"tags": ["decoder-only", "multimodal", "gqa"]}}
+    )
+    assert vlm.is_multimodal() and vlm.is_decoder_only()
+    assert vlm.modality == "multimodal"  # most specific wins
+
+    audio = ModelSpec.model_validate({"architecture": {"tags": ["audio", "mha"]}})
+    assert not audio.is_decoder_only()
+    assert audio.modality == "audio"
+
+    assert ModelSpec.model_validate({}).modality == "unknown"
+
+
 def test_is_moe_and_merged_and_derived():
     spec = ModelSpec.model_validate(
         {

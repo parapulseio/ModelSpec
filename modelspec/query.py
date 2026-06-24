@@ -49,6 +49,19 @@ def is_derived(spec: ModelSpec) -> bool:
     return spec.is_derived()
 
 
+def is_decoder_only(spec: ModelSpec) -> bool:
+    return spec.is_decoder_only()
+
+
+def is_multimodal(spec: ModelSpec) -> bool:
+    return spec.is_multimodal()
+
+
+def has_chat_template(spec: ModelSpec) -> bool:
+    """True if the tokenizer ships a chat template (a weak instruct-model proxy)."""
+    return spec.tokenizer.chat_template_present is True
+
+
 def commercial_use_allowed(spec: ModelSpec) -> bool:
     """Strict: only True when the license explicitly permits commercial use."""
     return spec.license.commercial_use is True
@@ -67,6 +80,16 @@ def quant_format_in(*formats: str) -> Predicate:
     """Match a quantization format discriminator, e.g. ``quant_format_in("gguf", "awq")``."""
     wanted = {f.lower() for f in formats}
     return lambda spec: spec.quant_format is not None and spec.quant_format.lower() in wanted
+
+
+def modality_is(*modalities: str) -> Predicate:
+    """Match the coarse modality, e.g. ``modality_is("decoder-only", "multimodal")``.
+
+    Useful to keep non-decoder models (audio / vision / encoder / seq2seq) out of
+    an LLM-focused query.
+    """
+    wanted = {m.lower() for m in modalities}
+    return lambda spec: spec.modality.lower() in wanted
 
 
 def min_params(n: float) -> Predicate:

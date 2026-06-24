@@ -115,7 +115,7 @@ _modelspec_complete() {
     fi
     case "${COMP_WORDS[1]}" in
         extract) COMPREPLY=( $(compgen -W "--format -o --output --offline --revision --show-provenance --strict" -- "$cur") );;
-        batch|coverage) COMPREPLY=( $(compgen -W "--offline --revision --workers --limit --target-timeout --format --top --quiet --output-dir" -- "$cur") );;
+        batch|coverage) COMPREPLY=( $(compgen -W "--offline --revision --workers --limit --target-timeout --delay --format --top --quiet --output-dir" -- "$cur") );;
         explain) COMPREPLY=( $(compgen -W "--format" -- "$cur") );;
         completion) COMPREPLY=( $(compgen -W "bash zsh fish" -- "$cur") );;
     esac
@@ -134,7 +134,7 @@ _modelspec() {
     fi
     case $words[2] in
         extract) compadd -- --format -o --output --offline --revision --show-provenance --strict;;
-        batch|coverage) compadd -- --offline --revision --workers --limit --target-timeout --format --top --quiet --output-dir;;
+        batch|coverage) compadd -- --offline --revision --workers --limit --target-timeout --delay --format --top --quiet --output-dir;;
         explain) compadd -- --format;;
         completion) compadd -- bash zsh fish;;
     esac

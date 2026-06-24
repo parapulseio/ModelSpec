@@ -37,6 +37,18 @@ def test_bare_predicates():
     assert q.commercial_use_allowed(LLAMA_Q) and not q.commercial_use_allowed(QWEN_FP)
 
 
+def test_modality_predicates():
+    llm = _spec(architecture={"tags": ["decoder-only", "gqa"]})
+    vlm = _spec(architecture={"tags": ["decoder-only", "multimodal"]})
+    audio = _spec(architecture={"tags": ["audio", "mha"]})
+    assert q.is_multimodal(vlm) and not q.is_multimodal(llm)
+    assert q.is_decoder_only(llm) and not q.is_decoder_only(audio)
+    assert q.modality_is("multimodal")(vlm)
+    assert q.modality_is("audio", "vision")(audio)
+    chat = _spec(tokenizer={"chat_template_present": True})
+    assert q.has_chat_template(chat) and not q.has_chat_template(llm)
+
+
 def test_factory_predicates():
     assert q.family_is("LLAMA")(LLAMA_Q)  # case-insensitive
     assert not q.family_is("mistral")(LLAMA_Q)
