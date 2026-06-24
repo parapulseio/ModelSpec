@@ -318,6 +318,83 @@ class ModelSpec(_Model):
         default_factory=Provenance, description="Field-level sources, conflicts, warnings, raw blobs."
     )
 
+    # ------------------------------------------------------------------ #
+    # Convenience API for downstream consumers (M5).
+    #
+    # These wrap the orthogonal sub-structures and field-level provenance into
+    # cheap, side-effect-free accessors so callers don't have to know that, e.g.,
+    # "is this quantized?" means ``spec.quantization is not None``, or that the
+    # effective context window falls back through three fields. They never raise
+    # and never mutate; they are pure projections of already-validated state.
+    # The predicate/filter helpers for *collections* of specs live in
+    # ``modelspec.query``.
+    # ------------------------------------------------------------------ #
+
+    def is_quantized(self) -> bool:
+        """True if a quantization sub-structure was detected."""
+        return self.quantization is not None
+
+    def is_merged(self) -> bool:
+        """True if this model was identified as a merge."""
+        return self.merge is not None
+
+    def is_moe(self) -> bool:
+        """True if this is a mixture-of-experts model."""
+        return self.moe is not None
+
+    def is_adapter(self) -> bool:
+        """True if an adapter (PEFT/LoRA) sub-structure is present."""
+        return self.adapter is not None
+
+    def is_derived(self) -> bool:
+        """True if this model declares any upstream base model (lineage)."""
+        return bool(self.identity.lineage and self.identity.lineage.base_models)
+
+    @property
+    def quant_format(self) -> Optional[str]:
+        """The quantization format discriminator (``gguf`` / ``awq`` / ``gptq``), or None."""
+        return getattr(self.quantization, "format", None)
+
+    @property
+    def bits_per_weight(self) -> Optional[float]:
+        """Average bits-per-weight, regardless of quant format. None if not quantized."""
+        q = self.quantization
+        if q is None:
+            return None
+        if isinstance(q, GGUFQuant):
+            return q.bits_per_weight_avg
+        bits = getattr(q, "bits", None)  # AWQ / GPTQ carry a nominal bit width
+        return float(bits) if bits is not None else None
+
+    @property
+    def effective_context(self) -> Optional[int]:
+        """Best available context-window length.
+
+        Prefers the RoPE-scaled ``effective`` value, then the config-``declared``
+        window, then the card-sourced ``trained`` window — so callers get the
+        most useful single number without re-implementing the fallback.
+        """
+        c = self.context
+        return c.effective or c.declared or c.trained
+
+    def source_of(self, field_path: str) -> Optional[SourceLabel]:
+        """Which source produced the winning value for ``field_path`` (dotted)."""
+        fp = self.provenance.per_field.get(field_path)
+        return fp.source if fp else None
+
+    def confidence_of(self, field_path: str) -> Optional[Confidence]:
+        """Confidence of the winning value for ``field_path`` (dotted)."""
+        fp = self.provenance.per_field.get(field_path)
+        return fp.confidence if fp else None
+
+    def is_not_applicable(self, field_path: str) -> bool:
+        """True if ``field_path`` is legitimately N/A for this model (not merely missing)."""
+        return field_path in self.provenance.not_applicable
+
+    def conflicts_for(self, field_path: str) -> list[Conflict]:
+        """All archived losing claims recorded for ``field_path``."""
+        return [c for c in self.provenance.conflicts if c.field_path == field_path]
+
     @model_validator(mode="after")
     def _check_cross_field(self) -> "ModelSpec":
         """Light cross-field consistency checks.

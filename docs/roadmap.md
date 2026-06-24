@@ -68,6 +68,15 @@ Each round is an independent, valuable increment:
 
 > Code map and field-promotion workflow in [analytics.md](analytics.md). You can run `coverage` over the ~36K mergekit corpus (or sample with `--limit`) as a sanity check.
 
+### M5 — consumer help & ergonomics ✅ done
+- ✅ CLI: richer `--help` (usage examples epilog), `explain <field>` (fuzzy field docs introspected from the schema's `description=`), `completion bash|zsh|fish` (static scripts, no extra dep)
+- ✅ Library API: `ModelSpec` convenience accessors — `is_quantized()` / `is_merged()` / `is_moe()` / `is_derived()`, `quant_format` / `bits_per_weight` / `effective_context`, and provenance wrappers `source_of()` / `confidence_of()` / `is_not_applicable()` / `conflicts_for()`
+- ✅ `modelspec/query.py`: composable predicates (`is_quantized`, `family_is`, `min_params`, …) + combinators (`all_of` / `any_of` / `negate`) + `filter_specs`
+- ✅ `modelspec/explain.py`: `field_catalog()` / `explain_field()` flatten the live schema into dotted-path `FieldDoc`s
+- ✅ 24 unit tests added (helpers / query / explain / CLI explain + completion)
+
+> The orthogonal modeling + provenance are deliberately normalized for storage; M5 wraps the recurring access patterns so downstream consumers don't re-implement the edge cases. Code map in [helpers.md](helpers.md).
+
 ## Testing strategy
 
 - **Extractor unit tests**: feed a fixture file, assert the `FieldClaim` list — no download, no Pydantic mocking needed.

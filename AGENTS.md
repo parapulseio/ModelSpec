@@ -66,7 +66,8 @@ docs/                       # design docs
 - **M2 done**: GGUF / license / tokenizer extractors + `pipeline/cross_validate` (parameter double-path, context three-layer, MoE cross-check).
 - **M3 done**: quantization discriminated union (GGUF/AWQ/GPTQ, emitted by the gguf + config_json extractors) + merge extractor (five signals + recipe parsing + lineage).
 - **M4 done**: `modelspec/analytics/` (`batch` concurrent batch extraction + `coverage` dashboard), aggregating `provenance` into `unknown_fields` frequency / canonical fill rates / per-family fill rates + promotion candidates, driving the field-promotion workflow. 63 unit tests, all green. Code map in [docs/development.md](docs/development.md) and [docs/analytics.md](docs/analytics.md).
-- All four roadmap milestones are complete. Follow-up increments: BnB/FP8/MLX quantization branches, adapter extraction, README YAML codeblock parsing. `gguf` / `PyYAML` are optional deps (included in the `dev` extras); without PyYAML, merge is still detected but the `mergekit_config.yml` recipe is not parsed.
+- **M5 done**: consumer-facing help. CLI: richer `--help` / usage examples, `modelspec explain <field>` (fuzzy field docs introspected from the schema's `description=`), `modelspec completion bash|zsh|fish`. Library API: `ModelSpec` convenience accessors (`is_quantized()` / `effective_context` / `source_of()` …) wrapping the orthogonal structures + provenance, plus `modelspec.query` (composable predicates + `filter_specs`) and `modelspec.explain` (`field_catalog` / `explain_field`). See [docs/helpers.md](docs/helpers.md). 87 unit tests, all green.
+- All roadmap milestones are complete. Follow-up increments: BnB/FP8/MLX quantization branches, adapter extraction, README YAML codeblock parsing. `gguf` / `PyYAML` are optional deps (included in the `dev` extras); without PyYAML, merge is still detected but the `mergekit_config.yml` recipe is not parsed.
 
 ## Environment & testing conventions
 
@@ -91,7 +92,8 @@ docs/                       # design docs
 - [docs/extractors.md](docs/extractors.md) — extractors and three-layer extraction
 - [docs/pipeline.md](docs/pipeline.md) — orchestration, merging, cross-validation
 - [docs/quantization-and-merge.md](docs/quantization-and-merge.md) — quantization & merge modeling
-- [docs/cli.md](docs/cli.md) — CLI design
+- [docs/cli.md](docs/cli.md) — CLI design (incl. `explain` / `completion`, M5)
+- [docs/helpers.md](docs/helpers.md) — consumer helpers: spec accessors, query predicates, field catalog (M5)
 - [docs/analytics.md](docs/analytics.md) — batch extraction, coverage, field promotion (M4)
 - [docs/development.md](docs/development.md) — install, run, test, code map
 - [docs/roadmap.md](docs/roadmap.md) — roadmap & milestones
