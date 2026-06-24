@@ -23,7 +23,8 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 # Source labels attached to every claim / provenance entry.
 # "merged" is emitted by the merger for accumulated (unioned) list fields.
 SourceLabel = Literal[
-    "config", "tensors", "gguf", "inferred", "heuristic", "fingerprint", "keyword", "llm", "merged"
+    "config", "tokenizer", "tensors", "gguf", "inferred", "heuristic",
+    "fingerprint", "keyword", "llm", "merged",
 ]
 Confidence = Literal["high", "medium", "low"]
 

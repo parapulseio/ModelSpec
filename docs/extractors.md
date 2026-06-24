@@ -79,6 +79,8 @@ For non-decoder-scope models, any decoder-centric canonical field we couldn't fi
 - `q_lora_rank` / `kv_lora_rank` → MLA (takes precedence; `num_kv_heads` is flagged `not_applicable`)
 - `sliding_window` → local attention
 - `rope_scaling.type` → yarn / ntk / dynamic / linear
+- **`head_dim` absent → derived** as `hidden_size / num_heads` (non-MLA), since most configs omit it; a declared `head_dim` is used verbatim
+- config's `vocab_size` is emitted at **medium** confidence (it's the often-padded embedding size); the tokenizer extractor's `tokenizer.json` count wins on conflict
 
 ## safetensors extractor
 
@@ -129,7 +131,7 @@ GGUF header layout (little-endian), read in order, stop after tensor infos:
 
 ## tokenizer extractor
 
-Read `tokenizer_config.json` / `tokenizer.json`: `type` / `vocab_size` / `chat_template_present`.
+Reads `tokenizer_config.json` (chat template), `tokenizer.json` (`type` / `vocab_size`), and `generation_config.json` (special-token ids `bos`/`eos`/`pad` as a fallback when config.json omits them). All claims use the distinct **`tokenizer`** source label (not `config`), so multi-source disagreements — e.g. `config vs tokenizer` on `vocab_size` — are legible in the coverage conflict histogram. `tokenizer.json`'s vocab count is `high` confidence and wins over config's `medium` (padded embedding size).
 
 ## Common pitfalls
 

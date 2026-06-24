@@ -1,4 +1,6 @@
 .claude/settings.local.json
+corpus.txt.csv
+report.json
 
 # Python
 .venv/

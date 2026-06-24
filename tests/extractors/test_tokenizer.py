@@ -41,3 +41,22 @@ def test_chat_template_and_type_and_vocab(tmp_path: Path):
 def test_no_chat_template(tmp_path: Path):
     claims, _ = _claims(tmp_path, {"tokenizer_config.json": {"tokenizer_class": "X"}})
     assert claims["tokenizer.chat_template_present"] is False
+
+
+def test_special_tokens_from_generation_config(tmp_path: Path):
+    claims, result = _claims(
+        tmp_path,
+        {"generation_config.json": {"bos_token_id": 1, "eos_token_id": [2, 7], "pad_token_id": 0}},
+    )
+    assert claims["tokenizer.bos_token_id"] == 1
+    assert claims["tokenizer.eos_token_id"] == [2, 7]
+    assert claims["tokenizer.pad_token_id"] == 0
+    # emitted as the distinct "tokenizer" source, at medium (config wins if present)
+    bos = next(c for c in result.claims if c.field_path == "tokenizer.bos_token_id")
+    assert bos.source == "tokenizer" and bos.confidence == "medium"
+
+
+def test_tokenizer_source_label(tmp_path: Path):
+    _, result = _claims(tmp_path, {"tokenizer.json": {"model": {"type": "BPE", "vocab": {"a": 0}}}})
+    vocab = next(c for c in result.claims if c.field_path == "tokenizer.vocab_size")
+    assert vocab.source == "tokenizer"  # legible "config vs tokenizer" in conflicts

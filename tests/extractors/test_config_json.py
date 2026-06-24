@@ -83,6 +83,27 @@ def test_special_tokens_and_head_dim(tmp_path: Path):
     assert claims["tokenizer.pad_token_id"] == 0
 
 
+def test_head_dim_inferred_when_absent(tmp_path: Path):
+    # Most configs omit head_dim; derive it as hidden_size/num_heads (non-MLA).
+    cfg = {"architectures": ["LlamaForCausalLM"], "hidden_size": 4096, "num_attention_heads": 32}
+    claims, _ = _claims(tmp_path, cfg)
+    assert claims["architecture.head_dim"] == 128
+    # but a declared head_dim is used verbatim (not overwritten)
+    cfg2 = {"architectures": ["LlamaForCausalLM"], "hidden_size": 4096,
+            "num_attention_heads": 32, "head_dim": 80}
+    claims2, _ = _claims(tmp_path, cfg2)
+    assert claims2["architecture.head_dim"] == 80
+
+
+def test_config_vocab_size_is_medium(tmp_path: Path):
+    cfg = {"architectures": ["LlamaForCausalLM"], "vocab_size": 128256}
+    write_config(tmp_path / "config.json", cfg)
+    src = ExtractionSource(root=tmp_path, repo_files=["config.json"])
+    result = ConfigJsonExtractor().extract(src)
+    vocab = next(c for c in result.claims if c.field_path == "tokenizer.vocab_size")
+    assert vocab.confidence == "medium"  # tokenizer.json (high) should win on conflict
+
+
 def test_mha_inferred_when_kv_heads_absent(tmp_path: Path):
     # Many configs omit num_key_value_heads (== MHA). We must still infer the
     # attention type and fill num_kv_heads from the query head count.

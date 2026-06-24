@@ -234,7 +234,11 @@ class ConfigJsonExtractor:
                 continue  # GQA kv-head count is not the operative quantity under MLA
             for name in candidates:
                 if name in eff:
-                    claims.append(FieldClaim(canonical_path, eff[name], "config", "high"))
+                    # config's vocab_size is the (often padded) embedding size; the
+                    # tokenizer's own count is more authoritative, so emit at medium
+                    # and let the tokenizer extractor win when both are present.
+                    conf = "medium" if canonical_path == "tokenizer.vocab_size" else "high"
+                    claims.append(FieldClaim(canonical_path, eff[name], "config", conf))
                     break
 
         family = _infer_family(raw)
@@ -273,6 +277,15 @@ class ConfigJsonExtractor:
             tags.append(tag)
             if n_kv is None:
                 claims.append(FieldClaim("attention.num_kv_heads", n_heads, "inferred", "high"))
+
+        # head_dim: most configs omit it (it's the default hidden_size/num_heads).
+        # Derive it for non-MLA models so the field is usable for KV-cache / vLLM.
+        if not is_mla and "head_dim" not in eff and n_heads:
+            hidden = eff.get("hidden_size") or eff.get("n_embd") or eff.get("d_model")
+            if isinstance(hidden, int) and n_heads and hidden % n_heads == 0:
+                claims.append(
+                    FieldClaim("architecture.head_dim", hidden // n_heads, "inferred", "medium")
+                )
 
         # MoE detection.
         n_experts = eff.get("num_local_experts") or eff.get("num_experts")
