@@ -141,3 +141,48 @@ def test_fetch_metadata_propagates_a_download_failure(monkeypatch):
     with pytest.raises(OSError):
         with hf.fetch_metadata("org/x") as src:
             pass
+
+
+# --- download_metadata / render_manifest (--download-only) ---
+
+
+def test_download_metadata_persists_files_and_classifies_kinds(tmp_path, monkeypatch):
+    repo_files = ["config.json", "model.safetensors", "model.bin"]
+    monkeypatch.setattr(hf, "_list_repo_files", lambda repo_id, revision: repo_files)
+
+    def fake_full(repo_id, fn, revision, dest):
+        (dest / fn).write_text("{}")
+
+    def fake_st(session, repo_id, fn, revision, dest):
+        write_safetensors_header(dest / fn, {"w": {"dtype": "F32", "shape": [2, 2]}})
+
+    monkeypatch.setattr(hf, "_download_full", fake_full)
+    monkeypatch.setattr(hf, "_download_safetensors_header", fake_st)
+
+    dest = tmp_path / "out"
+    entries = hf.download_metadata("org/model", dest_dir=dest)
+
+    by_name = {e.name: e for e in entries}
+    assert by_name["config.json"].kind == "full"
+    assert by_name["model.safetensors"].kind == "safetensors-header"
+    assert by_name["model.bin"].kind == "skipped"
+    assert by_name["model.bin"].bytes_on_disk is None
+    assert not (dest / "model.bin").exists()  # weights are never written
+    assert (dest / "config.json").is_file()
+    assert (dest / "model.safetensors").is_file()
+
+
+def test_render_manifest_has_next_step_commands(tmp_path):
+    entries = [
+        hf.DownloadedFile("config.json", "full", 42),
+        hf.DownloadedFile("model.safetensors", "safetensors-header", 128),
+        hf.DownloadedFile("model.bin", "skipped", None),
+    ]
+    dest = tmp_path / "org" / "model"
+    text = hf.render_manifest(
+        repo_id="org/model", revision=None, dest_dir=dest, entries=entries
+    )
+    assert "repo_id: org/model" in text
+    assert "1 weight file(s) skipped" in text
+    assert f"modelspec extract {dest} --analysis-only" in text
+    assert "modelspec extract org/model --download-only" in text

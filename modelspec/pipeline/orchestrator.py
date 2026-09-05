@@ -112,6 +112,23 @@ def extract_from_source(source: ExtractionSource) -> ModelSpec:
     return spec
 
 
+def _manifest_repo_id(path: Path, manifest_filename: str) -> str | None:
+    """Recover the real repo_id from a ``--download-only`` manifest, if present.
+
+    Lets a directory previously produced by ``download_metadata`` report its
+    original HF repo_id in ``identity.repo_id`` instead of the local path.
+    """
+    manifest = path / manifest_filename
+    if not manifest.is_file():
+        return None
+    for line in manifest.read_text(encoding="utf-8", errors="replace").splitlines():
+        line = line.strip()
+        if line.startswith("- repo_id:"):
+            value = line.split(":", 1)[1].strip()
+            return value or None
+    return None
+
+
 def extract(repo_id_or_path: str, *, revision: str | None = None, offline: bool = False) -> ModelSpec:
     """Top-level entry point.
 
@@ -120,13 +137,18 @@ def extract(repo_id_or_path: str, *, revision: str | None = None, offline: bool 
     """
     path = Path(repo_id_or_path)
     if path.is_dir():
+        from modelspec.io.hf_fetcher import MANIFEST_FILENAME
+
         repo_files = [
-            str(p.relative_to(path)) for p in path.rglob("*") if p.is_file()
+            str(p.relative_to(path))
+            for p in path.rglob("*")
+            if p.is_file() and p.name != MANIFEST_FILENAME
         ]
+        repo_id = _manifest_repo_id(path, MANIFEST_FILENAME) or repo_id_or_path
         source = ExtractionSource(
             root=path,
             repo_files=repo_files,
-            repo_id=repo_id_or_path,
+            repo_id=repo_id,
             source_format=detect_source_format(repo_files),
         )
         return extract_from_source(source)

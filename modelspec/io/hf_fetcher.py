@@ -20,11 +20,18 @@ import tempfile
 import threading
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
+from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Iterator
 
 from modelspec.extractors.base import ExtractionSource
 from modelspec.pipeline.orchestrator import detect_source_format
+
+# Name of the manifest ``download_metadata`` writes into the output directory;
+# the orchestrator's local-directory branch reads it back to recover the real
+# repo_id (see modelspec/pipeline/orchestrator.py).
+MANIFEST_FILENAME = "MODELSPEC_MANIFEST.md"
 
 # Small metadata files worth downloading in full when present.
 _SMALL_FILES = {
@@ -183,6 +190,22 @@ def _download_gguf_header(
     target.write_bytes(data)
 
 
+def _classify(filename: str) -> str:
+    """Classify one repo file the way ``_plan_downloads`` treats it.
+
+    Shared by the download planner and the ``--download-only`` manifest so the
+    two never drift apart on what counts as "downloaded" vs. "skipped".
+    """
+    base = filename.rsplit("/", 1)[-1]
+    if base in _SMALL_FILES or base in _LICENSE_NAMES:
+        return "full"
+    if filename.endswith(".safetensors"):
+        return "safetensors-header"
+    if filename.endswith(".gguf"):
+        return "gguf-header"
+    return "skipped"  # other weights (.bin, .pth, etc.) are intentionally skipped.
+
+
 def _plan_downloads(repo_id, revision, tmp, session, repo_files):
     """Build the list of (callable, args) download tasks for a repo.
 
@@ -191,14 +214,13 @@ def _plan_downloads(repo_id, revision, tmp, session, repo_files):
     """
     tasks = []
     for fn in repo_files:
-        base = fn.rsplit("/", 1)[-1]
-        if base in _SMALL_FILES or base in _LICENSE_NAMES:
+        kind = _classify(fn)
+        if kind == "full":
             tasks.append((_download_full, (repo_id, fn, revision, tmp)))
-        elif fn.endswith(".safetensors"):
+        elif kind == "safetensors-header":
             tasks.append((_download_safetensors_header, (session, repo_id, fn, revision, tmp)))
-        elif fn.endswith(".gguf"):
+        elif kind == "gguf-header":
             tasks.append((_download_gguf_header, (session, repo_id, fn, revision, tmp)))
-        # other weights (.bin, .pth, etc.) are intentionally skipped.
     return tasks
 
 
@@ -240,3 +262,116 @@ def fetch_metadata(
     finally:
         session.close()
         shutil.rmtree(tmp, ignore_errors=True)
+
+
+@dataclass
+class DownloadedFile:
+    """One repo file's outcome from ``download_metadata``, for the manifest."""
+
+    name: str
+    kind: str  # "full" | "safetensors-header" | "gguf-header" | "skipped"
+    bytes_on_disk: int | None  # None for "skipped" (never written to disk)
+
+
+def download_metadata(
+    repo_id: str,
+    revision: str | None = None,
+    *,
+    dest_dir: Path,
+    max_workers: int = _FETCH_WORKERS,
+) -> list[DownloadedFile]:
+    """Download a model's metadata into ``dest_dir`` and leave it on disk.
+
+    Same file selection and concurrency as ``fetch_metadata`` (small files in
+    full, safetensors/GGUF header-only, other weights skipped), but writes into
+    a caller-supplied persistent directory instead of a temp dir that gets
+    cleaned up — this is what powers ``modelspec extract --download-only``.
+    Returns a per-file manifest describing what happened to each repo file.
+    """
+    repo_files = _list_repo_files(repo_id, revision)
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    session = _make_session()
+    try:
+        tasks = _plan_downloads(repo_id, revision, dest_dir, session, repo_files)
+        if tasks:
+            with ThreadPoolExecutor(max_workers=min(max_workers, len(tasks))) as pool:
+                futures = [pool.submit(_guarded, fn_, args) for fn_, args in tasks]
+                for fut in futures:
+                    fut.result()
+    finally:
+        session.close()
+
+    entries = []
+    for fn in repo_files:
+        kind = _classify(fn)
+        size = None
+        if kind != "skipped":
+            local = dest_dir / fn
+            size = local.stat().st_size if local.is_file() else None
+        entries.append(DownloadedFile(name=fn, kind=kind, bytes_on_disk=size))
+    return entries
+
+
+_KIND_LABEL = {
+    "full": "full download",
+    "safetensors-header": "header only (HTTP Range request)",
+    "gguf-header": f"header only (first {_GGUF_PREFIX // (1024 * 1024)}MB prefix)",
+    "skipped": "skipped — weight file, not downloaded",
+}
+
+
+def render_manifest(
+    *, repo_id: str, revision: str | None, dest_dir: Path, entries: list[DownloadedFile]
+) -> str:
+    """Render the ``--download-only`` markdown report for one target.
+
+    Documents what was pulled to disk and how (so a reader can trust that no
+    weights were downloaded), plus copy-pasteable next-step commands: analyze
+    what's here now, or re-download and analyze again.
+    """
+    total_bytes = sum(e.bytes_on_disk or 0 for e in entries)
+    n_full = sum(1 for e in entries if e.kind == "full")
+    n_header = sum(1 for e in entries if e.kind in ("safetensors-header", "gguf-header"))
+    n_skipped = sum(1 for e in entries if e.kind == "skipped")
+
+    lines = [
+        "# ModelSpec download manifest",
+        "",
+        f"- repo_id: {repo_id}",
+        f"- revision: {revision or '(default branch)'}",
+        f"- fetched_at: {datetime.now(timezone.utc).isoformat(timespec='seconds')}",
+        f"- output_dir: {dest_dir}",
+        "",
+        f"**{len(entries)} files on the Hub — {n_full} downloaded in full, "
+        f"{n_header} header-only, {n_skipped} weight file(s) skipped. "
+        f"~{total_bytes / (1024 * 1024):.2f} MB written to disk.**",
+        "",
+        "## Files",
+        "",
+        "| file | kind | size on disk |",
+        "| --- | --- | --- |",
+    ]
+    for e in sorted(entries, key=lambda e: e.name):
+        size_str = f"{e.bytes_on_disk:,} B" if e.bytes_on_disk is not None else "—"
+        lines.append(f"| {e.name} | {_KIND_LABEL[e.kind]} | {size_str} |")
+
+    lines += [
+        "",
+        "## Next steps",
+        "",
+        "Analyze what's here now — no network access:",
+        "",
+        f"    modelspec extract {dest_dir} --analysis-only",
+        "",
+        "Re-download fresh copies (e.g. the repo changed upstream), then analyze:",
+        "",
+        f"    modelspec extract {repo_id} --download-only --output-dir {dest_dir}",
+        f"    modelspec extract {dest_dir} --analysis-only",
+        "",
+        "Or skip this two-step workflow and do both in one shot "
+        "(fetches over the network every time):",
+        "",
+        f"    modelspec extract {repo_id}",
+        "",
+    ]
+    return "\n".join(lines)
