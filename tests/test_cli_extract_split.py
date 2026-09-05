@@ -38,6 +38,14 @@ def _patch_fake_download(monkeypatch):
 
     monkeypatch.setattr(hf, "_download_full", fake_full)
     monkeypatch.setattr(hf, "_download_safetensors_header", fake_st)
+    monkeypatch.setattr(hf, "_resolve_commit_sha", lambda repo_id, revision: "cafef00d" * 5)
+    monkeypatch.setattr(
+        hf,
+        "_list_repo_file_hashes",
+        lambda repo_id, revision: {
+            "model.safetensors": {"oid": "blob-st", "sha256": "full-file-sha256"},
+        },
+    )
 
 
 def test_download_only_writes_files_and_manifest(tmp_path, monkeypatch):
@@ -56,9 +64,12 @@ def test_download_only_writes_files_and_manifest(tmp_path, monkeypatch):
     assert manifest_path.is_file()
     manifest = manifest_path.read_text(encoding="utf-8")
     assert "repo_id: org/model" in manifest
+    assert "commit: " + "cafef00d" * 5 in manifest
     assert "config.json" in manifest
     assert "full download" in manifest
     assert "header only (HTTP Range request)" in manifest
+    # the header-only file's full-file content hash is recorded as evidence
+    assert "full-file-sha256" in manifest
     # next-step commands point at the same directory
     assert f"--analysis-only" in manifest
     assert str(out_dir) in manifest

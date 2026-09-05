@@ -76,17 +76,21 @@ def _cmd_extract_download_only(args: argparse.Namespace) -> int:
 
     dest_dir = Path(args.output_dir) if args.output_dir else Path(args.repo_id)
     try:
-        entries = download_metadata(args.repo_id, revision=args.revision, dest_dir=dest_dir)
+        result = download_metadata(args.repo_id, revision=args.revision, dest_dir=dest_dir)
     except Exception as e:  # network / HTTP errors
         print(f"error: download failed: {e}", file=sys.stderr)
         return 1
 
     manifest = render_manifest(
-        repo_id=args.repo_id, revision=args.revision, dest_dir=dest_dir, entries=entries
+        repo_id=args.repo_id,
+        revision=args.revision,
+        dest_dir=dest_dir,
+        commit_sha=result.commit_sha,
+        entries=result.files,
     )
     (dest_dir / MANIFEST_FILENAME).write_text(manifest, encoding="utf-8")
 
-    n_downloaded = sum(1 for e in entries if e.kind != "skipped")
+    n_downloaded = sum(1 for e in result.files if e.kind != "skipped")
     print(f"downloaded {n_downloaded} file(s) to {dest_dir}/", file=sys.stderr)
     print(f"manifest: {dest_dir / MANIFEST_FILENAME}", file=sys.stderr)
     return 0

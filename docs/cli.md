@@ -50,6 +50,8 @@ modelspec extract meta-llama/Llama-3.1-8B --analysis-only
 
 `--output-dir` defaults to `./<repo_id>` (mirroring the `org/name` path), so the same `repo_id` string works for both commands without repeating a path. `MODELSPEC_MANIFEST.md` records the original `repo_id` / `revision`, which `--analysis-only` (and offline `extract` on any local directory containing this file) reads back so `identity.repo_id` reflects the real Hub repo instead of the local path. The manifest also lists every file that landed on disk, how it was fetched (full download vs. header-only Range request), which weight files were skipped, and copy-pasteable commands for the two follow-up moves: analyze as-is, or re-run `--download-only` to refresh a stale copy.
 
+**Version evidence.** `revision` (e.g. `"main"`) can move over time, so the manifest also resolves and records the exact `commit` SHA it was fetched at (`HfApi.model_info(...).sha`), plus a per-file `oid` (git blob id) and, for LFS-tracked files (safetensors/GGUF/`.bin`), `sha256` — the Hub's hash of the **complete** upstream file. That `sha256` is what makes a header-only download provable: you can confirm the header came from an exact, specific published file without ever downloading the rest of it. These lookups are best-effort (a Hub hiccup degrades the manifest, e.g. `commit: unknown (Hub lookup failed)`, rather than failing the download).
+
 ## Auxiliary commands
 
 ```bash

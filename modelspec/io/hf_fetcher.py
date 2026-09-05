@@ -23,7 +23,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Iterator
+from typing import Any, Iterator
 
 from modelspec.extractors.base import ExtractionSource
 from modelspec.pipeline.orchestrator import detect_source_format
@@ -104,6 +104,51 @@ def _list_repo_files(repo_id: str, revision: str | None) -> list[str]:
     from huggingface_hub import HfApi
 
     return HfApi(token=_resolve_token()).list_repo_files(repo_id, revision=revision)
+
+
+def _resolve_commit_sha(repo_id: str, revision: str | None) -> str | None:
+    """The full commit SHA that ``revision`` (a branch/tag/SHA) resolves to.
+
+    ``revision`` alone isn't a stable version marker — "main" moves. Recording
+    the resolved commit is what lets someone later prove exactly which commit
+    a --download-only snapshot came from. Best-effort: a Hub hiccup here must
+    not fail the download itself.
+    """
+    from huggingface_hub import HfApi
+
+    try:
+        return HfApi(token=_resolve_token()).model_info(repo_id, revision=revision).sha
+    except Exception:
+        return None
+
+
+def _list_repo_file_hashes(repo_id: str, revision: str | None) -> dict[str, dict[str, Any]]:
+    """Per-file content hashes at ``revision``: ``{path: {"oid": ..., "sha256": ...}}``.
+
+    ``oid`` is the git blob id of the file's content (present for every file);
+    ``sha256`` is the full-file content hash for LFS-tracked files (safetensors
+    / gguf / bin) — computed by the Hub over the *complete* file, so it lets a
+    reader verify a header-only download against the real published file
+    without downloading the rest of it. Best-effort: returns {} on any error,
+    so a Hub hiccup here degrades the manifest but never blocks the download.
+    """
+    from huggingface_hub import HfApi
+    from huggingface_hub.hf_api import RepoFile
+
+    try:
+        tree = HfApi(token=_resolve_token()).list_repo_tree(
+            repo_id, recursive=True, revision=revision
+        )
+        return {
+            item.path: {
+                "oid": item.blob_id,
+                "sha256": item.lfs.sha256 if item.lfs else None,
+            }
+            for item in tree
+            if isinstance(item, RepoFile)
+        }
+    except Exception:
+        return {}
 
 
 def _make_session():
@@ -271,6 +316,16 @@ class DownloadedFile:
     name: str
     kind: str  # "full" | "safetensors-header" | "gguf-header" | "skipped"
     bytes_on_disk: int | None  # None for "skipped" (never written to disk)
+    oid: str | None = None  # git blob id of the file's content at this revision
+    sha256: str | None = None  # full-file hash (LFS files only) — verifiable even for header-only downloads
+
+
+@dataclass
+class DownloadResult:
+    """Everything ``download_metadata`` learned, for ``render_manifest``."""
+
+    commit_sha: str | None  # the exact commit `revision` resolved to at fetch time
+    files: list[DownloadedFile]
 
 
 def download_metadata(
@@ -279,14 +334,16 @@ def download_metadata(
     *,
     dest_dir: Path,
     max_workers: int = _FETCH_WORKERS,
-) -> list[DownloadedFile]:
+) -> DownloadResult:
     """Download a model's metadata into ``dest_dir`` and leave it on disk.
 
     Same file selection and concurrency as ``fetch_metadata`` (small files in
     full, safetensors/GGUF header-only, other weights skipped), but writes into
     a caller-supplied persistent directory instead of a temp dir that gets
     cleaned up — this is what powers ``modelspec extract --download-only``.
-    Returns a per-file manifest describing what happened to each repo file.
+    Also resolves the commit ``revision`` points to and each file's content
+    hash, so the manifest can prove exactly which upstream version was fetched
+    even for header-only files.
     """
     repo_files = _list_repo_files(repo_id, revision)
     dest_dir.mkdir(parents=True, exist_ok=True)
@@ -301,6 +358,9 @@ def download_metadata(
     finally:
         session.close()
 
+    commit_sha = _resolve_commit_sha(repo_id, revision)
+    hashes = _list_repo_file_hashes(repo_id, revision)
+
     entries = []
     for fn in repo_files:
         kind = _classify(fn)
@@ -308,8 +368,13 @@ def download_metadata(
         if kind != "skipped":
             local = dest_dir / fn
             size = local.stat().st_size if local.is_file() else None
-        entries.append(DownloadedFile(name=fn, kind=kind, bytes_on_disk=size))
-    return entries
+        h = hashes.get(fn, {})
+        entries.append(
+            DownloadedFile(
+                name=fn, kind=kind, bytes_on_disk=size, oid=h.get("oid"), sha256=h.get("sha256")
+            )
+        )
+    return DownloadResult(commit_sha=commit_sha, files=entries)
 
 
 _KIND_LABEL = {
@@ -321,13 +386,19 @@ _KIND_LABEL = {
 
 
 def render_manifest(
-    *, repo_id: str, revision: str | None, dest_dir: Path, entries: list[DownloadedFile]
+    *,
+    repo_id: str,
+    revision: str | None,
+    dest_dir: Path,
+    commit_sha: str | None,
+    entries: list[DownloadedFile],
 ) -> str:
     """Render the ``--download-only`` markdown report for one target.
 
     Documents what was pulled to disk and how (so a reader can trust that no
-    weights were downloaded), plus copy-pasteable next-step commands: analyze
-    what's here now, or re-download and analyze again.
+    weights were downloaded), the exact upstream commit + per-file content
+    hashes (so a header-only download can still be verified against the real
+    file later), plus copy-pasteable next-step commands.
     """
     total_bytes = sum(e.bytes_on_disk or 0 for e in entries)
     n_full = sum(1 for e in entries if e.kind == "full")
@@ -339,6 +410,7 @@ def render_manifest(
         "",
         f"- repo_id: {repo_id}",
         f"- revision: {revision or '(default branch)'}",
+        f"- commit: {commit_sha or 'unknown (Hub lookup failed)'}",
         f"- fetched_at: {datetime.now(timezone.utc).isoformat(timespec='seconds')}",
         f"- output_dir: {dest_dir}",
         "",
@@ -346,14 +418,22 @@ def render_manifest(
         f"{n_header} header-only, {n_skipped} weight file(s) skipped. "
         f"~{total_bytes / (1024 * 1024):.2f} MB written to disk.**",
         "",
+        "`revision` can move (e.g. a branch); `commit` is the exact snapshot fetched. "
+        "`sha256` is the Hub's hash of the *complete* upstream file — for header-only "
+        "safetensors/GGUF entries this is how you verify the header came from that exact "
+        "published file without downloading the rest of it.",
+        "",
         "## Files",
         "",
-        "| file | kind | size on disk |",
-        "| --- | --- | --- |",
+        "| file | kind | size on disk | oid | sha256 |",
+        "| --- | --- | --- | --- | --- |",
     ]
     for e in sorted(entries, key=lambda e: e.name):
         size_str = f"{e.bytes_on_disk:,} B" if e.bytes_on_disk is not None else "—"
-        lines.append(f"| {e.name} | {_KIND_LABEL[e.kind]} | {size_str} |")
+        lines.append(
+            f"| {e.name} | {_KIND_LABEL[e.kind]} | {size_str} | "
+            f"{e.oid or '—'} | {e.sha256 or '—'} |"
+        )
 
     lines += [
         "",

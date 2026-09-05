@@ -146,9 +146,17 @@ def test_fetch_metadata_propagates_a_download_failure(monkeypatch):
 # --- download_metadata / render_manifest (--download-only) ---
 
 
+def _patch_no_hash_lookup(monkeypatch):
+    """download_metadata's commit/hash lookups are best-effort extras; keep
+    tests hermetic by stubbing them out unless a test cares about the content."""
+    monkeypatch.setattr(hf, "_resolve_commit_sha", lambda repo_id, revision: None)
+    monkeypatch.setattr(hf, "_list_repo_file_hashes", lambda repo_id, revision: {})
+
+
 def test_download_metadata_persists_files_and_classifies_kinds(tmp_path, monkeypatch):
     repo_files = ["config.json", "model.safetensors", "model.bin"]
     monkeypatch.setattr(hf, "_list_repo_files", lambda repo_id, revision: repo_files)
+    _patch_no_hash_lookup(monkeypatch)
 
     def fake_full(repo_id, fn, revision, dest):
         (dest / fn).write_text("{}")
@@ -160,9 +168,9 @@ def test_download_metadata_persists_files_and_classifies_kinds(tmp_path, monkeyp
     monkeypatch.setattr(hf, "_download_safetensors_header", fake_st)
 
     dest = tmp_path / "out"
-    entries = hf.download_metadata("org/model", dest_dir=dest)
+    result = hf.download_metadata("org/model", dest_dir=dest)
 
-    by_name = {e.name: e for e in entries}
+    by_name = {e.name: e for e in result.files}
     assert by_name["config.json"].kind == "full"
     assert by_name["model.safetensors"].kind == "safetensors-header"
     assert by_name["model.bin"].kind == "skipped"
@@ -172,17 +180,70 @@ def test_download_metadata_persists_files_and_classifies_kinds(tmp_path, monkeyp
     assert (dest / "model.safetensors").is_file()
 
 
+def test_download_metadata_records_commit_and_file_hashes(tmp_path, monkeypatch):
+    repo_files = ["config.json", "model.safetensors"]
+    monkeypatch.setattr(hf, "_list_repo_files", lambda repo_id, revision: repo_files)
+    monkeypatch.setattr(hf, "_resolve_commit_sha", lambda repo_id, revision: "deadbeef" * 5)
+    monkeypatch.setattr(
+        hf,
+        "_list_repo_file_hashes",
+        lambda repo_id, revision: {
+            "config.json": {"oid": "blob-config", "sha256": None},
+            "model.safetensors": {"oid": "blob-st", "sha256": "content-sha256"},
+        },
+    )
+
+    def fake_full(repo_id, fn, revision, dest):
+        (dest / fn).write_text("{}")
+
+    def fake_st(session, repo_id, fn, revision, dest):
+        write_safetensors_header(dest / fn, {"w": {"dtype": "F32", "shape": [2, 2]}})
+
+    monkeypatch.setattr(hf, "_download_full", fake_full)
+    monkeypatch.setattr(hf, "_download_safetensors_header", fake_st)
+
+    result = hf.download_metadata("org/model", dest_dir=tmp_path / "out")
+
+    assert result.commit_sha == "deadbeef" * 5
+    by_name = {e.name: e for e in result.files}
+    assert by_name["config.json"].oid == "blob-config"
+    assert by_name["config.json"].sha256 is None  # not LFS-tracked
+    assert by_name["model.safetensors"].sha256 == "content-sha256"
+
+
 def test_render_manifest_has_next_step_commands(tmp_path):
     entries = [
-        hf.DownloadedFile("config.json", "full", 42),
-        hf.DownloadedFile("model.safetensors", "safetensors-header", 128),
+        hf.DownloadedFile("config.json", "full", 42, oid="blob-config"),
+        hf.DownloadedFile(
+            "model.safetensors", "safetensors-header", 128, oid="blob-st", sha256="content-sha256"
+        ),
         hf.DownloadedFile("model.bin", "skipped", None),
     ]
     dest = tmp_path / "org" / "model"
     text = hf.render_manifest(
-        repo_id="org/model", revision=None, dest_dir=dest, entries=entries
+        repo_id="org/model",
+        revision=None,
+        dest_dir=dest,
+        commit_sha="deadbeef" * 5,
+        entries=entries,
     )
     assert "repo_id: org/model" in text
+    assert "commit: " + "deadbeef" * 5 in text
     assert "1 weight file(s) skipped" in text
+    assert "content-sha256" in text  # full-file hash for the header-only entry
+    assert "blob-config" in text
     assert f"modelspec extract {dest} --analysis-only" in text
     assert "modelspec extract org/model --download-only" in text
+
+
+def test_render_manifest_handles_missing_commit_and_hashes(tmp_path):
+    # Best-effort lookups can fail; the manifest must still render cleanly.
+    entries = [hf.DownloadedFile("config.json", "full", 42)]
+    text = hf.render_manifest(
+        repo_id="org/model",
+        revision=None,
+        dest_dir=tmp_path,
+        commit_sha=None,
+        entries=entries,
+    )
+    assert "unknown (Hub lookup failed)" in text
