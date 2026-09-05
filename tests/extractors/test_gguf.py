@@ -95,3 +95,56 @@ def test_gguf_moe(tmp_path: Path):
     assert claims["moe.num_experts"] == 60
     assert claims["moe.top_k"] == 4
     assert claims["attention.type"] == "mha"
+
+
+def test_gguf_single_file_layout(tmp_path: Path):
+    claims, _ = _claims(
+        tmp_path,
+        kv={"general.architecture": "llama", "llama.block_count": 4},
+        tensors={"token_embd.weight": ([8, 8], "F32")},
+    )
+    assert claims["identity.file_layout"] == "single"
+
+
+def test_gguf_sharded_via_split_count_kv(tmp_path: Path):
+    # A split-aware writer (llama.cpp's gguf-split) embeds split.count in every
+    # part's own header — this is enough to detect sharding without reading
+    # the other parts.
+    claims, _ = _claims(
+        tmp_path,
+        kv={
+            "general.architecture": "llama",
+            "llama.block_count": 4,
+            "split.count": 3,
+        },
+        tensors={"token_embd.weight": ([8, 8], "F32")},
+    )
+    assert claims["identity.file_layout"] == "sharded"
+
+
+def test_gguf_sharded_via_filename_pattern(tmp_path: Path):
+    # Fallback signal when split.count is absent: the "-NNNNN-of-MMMMM.gguf"
+    # naming convention gguf-split uses.
+    path = tmp_path / "model-00001-of-00003.gguf"
+    write_gguf(
+        path,
+        kv={"general.architecture": "llama", "llama.block_count": 4},
+        tensors={"token_embd.weight": ([8, 8], "F32")},
+    )
+    src = ExtractionSource(root=tmp_path, repo_files=[path.name])
+    claims = {c.field_path: c.value for c in GGUFExtractor().extract(src).claims}
+    assert claims["identity.file_layout"] == "sharded"
+
+
+def test_gguf_single_part_split_naming_not_sharded(tmp_path: Path):
+    # "-00001-of-00001" is a single-part file that merely went through
+    # gguf-split's naming; must not be flagged as sharded.
+    path = tmp_path / "model-00001-of-00001.gguf"
+    write_gguf(
+        path,
+        kv={"general.architecture": "llama", "llama.block_count": 4},
+        tensors={"token_embd.weight": ([8, 8], "F32")},
+    )
+    src = ExtractionSource(root=tmp_path, repo_files=[path.name])
+    claims = {c.field_path: c.value for c in GGUFExtractor().extract(src).claims}
+    assert claims["identity.file_layout"] == "single"

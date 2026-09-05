@@ -13,6 +13,7 @@ See docs/extractors.md.
 
 from __future__ import annotations
 
+import re
 import struct
 from math import prod
 from typing import Any, BinaryIO
@@ -171,6 +172,27 @@ _TOKENIZER_MODEL_MAP = {
     "t5": "Unigram",
 }
 
+# llama.cpp's gguf-split names shards "<name>-00001-of-00005.gguf".
+_SPLIT_FILENAME_RE = re.compile(r"-\d+-of-(\d+)\.gguf$", re.IGNORECASE)
+
+
+def _is_sharded(fields: dict[str, Any], filename: str) -> bool:
+    """Detect a multi-part GGUF split.
+
+    We only ever read one part (the extractor does not aggregate tensors across
+    shards yet), so this exists to avoid mislabeling ``identity.file_layout`` as
+    "single" when the file is actually one part of a split. Two independent
+    signals: the ``split.count`` KV a split-aware writer embeds in every part,
+    and the "-NNNNN-of-MMMMM.gguf" filename convention gguf-split uses.
+    """
+    count = fields.get("split.count")
+    if isinstance(count, int) and count > 1:
+        return True
+    m = _SPLIT_FILENAME_RE.search(filename)
+    if m and int(m.group(1)) > 1:
+        return True
+    return False
+
 
 class GGUFExtractor:
     name = "gguf"
@@ -306,7 +328,8 @@ class GGUFExtractor:
             if "imat" in path.name.lower():
                 claims.append(FieldClaim("quantization.has_imatrix", True, "heuristic", "low"))
 
-        claims.append(FieldClaim("identity.file_layout", "single", "gguf", "high"))
+        file_layout = "sharded" if _is_sharded(fields, path.name) else "single"
+        claims.append(FieldClaim("identity.file_layout", file_layout, "gguf", "high"))
         claims.append(FieldClaim("architecture.tags", tags, "inferred", "medium"))
 
         # --- passthrough + raw ---
