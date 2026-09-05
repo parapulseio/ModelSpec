@@ -121,6 +121,8 @@ GGUF header layout (little-endian), read in order, stop after tensor infos:
 - Bits-per-weight: look up `GGML_QUANT_SIZES` (block_elements, block_bytes) per tensor type — **Q4_K_M is ~4.83 bpw, not 4** — and average over all weights
 - canonical normalizes known `{arch}.*` keys; `general.*` keys go to passthrough; the compact KV dump (arrays folded to `{"_array_len": n}`) goes to raw
 
+> **Multi-part GGUF (`gguf-split`) is detected and aggregated.** Sibling parts are found by the "`<prefix>-NNNNN-of-MMMMM.gguf`" filename convention (distinct quantization variants in the same repo don't match — they lack a shared prefix+total); a `split.count` KV field is the fallback signal when siblings can't be located by name. The "`-00001-of-*`" part is treated as primary (it carries the full architecture metadata on the versions of `gguf-split` that don't duplicate it into every part); tensor infos from every locally-available part are summed for `parameters.total` / `parameters.dtype_native` / quantization stats, and `identity.file_layout` reads `"sharded"`. If a sibling part isn't present locally, the aggregate is partial but the file is still correctly labeled `"sharded"` rather than `"single"`.
+
 ## license extractor (three-tier identification)
 
 1. **Fingerprint match**: normalize the text of `LICENSE` / `LICENSE.md` / `LICENSE.txt` / `MODEL_LICENSE` / `USE_POLICY.md` / `Notice` (strip whitespace, lowercase, take the first N characters), hash it, and compare against a preset fingerprint table — directly matching Apache-2.0 / MIT / Llama 3 Community / Gemma Terms / Qwen License / OpenRAIL, etc. Collecting 20–30 common licenses first covers 90%.
@@ -136,6 +138,7 @@ Reads `tokenizer_config.json` (chat template), `tokenizer.json` (`type` / `vocab
 ## Common pitfalls
 
 - Sharded safetensors must read `index.json` first.
+- Multi-part GGUF (`gguf-split`) must aggregate every locally-available sibling part (by filename convention or `split.count`), not just the first `.gguf` file found — otherwise `parameters.total` comes out short and `identity.file_layout` is wrong.
 - Missing `lm_head.weight` on tied embeddings is normal, not a bug.
 - Q4_K_M block-quant byte sizes need a table lookup, not bits/8.
 - MoE shared experts must not be subtracted from active.
