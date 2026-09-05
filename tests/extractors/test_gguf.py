@@ -148,3 +148,90 @@ def test_gguf_single_part_split_naming_not_sharded(tmp_path: Path):
     src = ExtractionSource(root=tmp_path, repo_files=[path.name])
     claims = {c.field_path: c.value for c in GGUFExtractor().extract(src).claims}
     assert claims["identity.file_layout"] == "single"
+
+
+def _write_shard(tmp_path: Path, part: int, total: int, kv: dict, tensors: dict) -> str:
+    name = f"model-{part:05d}-of-{total:05d}.gguf"
+    write_gguf(tmp_path / name, kv, tensors)
+    return name
+
+
+def test_gguf_shard_aggregation(tmp_path: Path):
+    # Only part 1 carries the full architecture metadata (the realistic case
+    # for older gguf-split output); parts 2 and 3 add tensors only.
+    part1 = _write_shard(
+        tmp_path,
+        1,
+        3,
+        kv={
+            "general.architecture": "llama",
+            "llama.block_count": 4,
+            "llama.embedding_length": 16,
+            "split.no": 0,
+            "split.count": 3,
+        },
+        tensors={"token_embd.weight": ([16, 8], "F32")},
+    )
+    part2 = _write_shard(
+        tmp_path,
+        2,
+        3,
+        kv={"general.architecture": "llama", "split.no": 1, "split.count": 3},
+        tensors={"blk.0.attn_q.weight": ([16, 8], "F32")},
+    )
+    part3 = _write_shard(
+        tmp_path,
+        3,
+        3,
+        kv={"general.architecture": "llama", "split.no": 2, "split.count": 3},
+        tensors={"output.weight": ([16, 8], "F32")},
+    )
+
+    # repo_files order should not matter — sibling lookup sorts by part number.
+    src = ExtractionSource(root=tmp_path, repo_files=[part3, part1, part2])
+    claims = {c.field_path: c.value for c in GGUFExtractor().extract(src).claims}
+
+    assert claims["identity.file_layout"] == "sharded"
+    assert claims["architecture.num_layers"] == 4  # only on part 1
+    assert claims["architecture.hidden_size"] == 16  # only on part 1
+    assert claims["parameters.total"] == 16 * 8 * 3  # summed across all 3 parts
+
+
+def test_gguf_shard_aggregation_missing_part_is_partial(tmp_path: Path):
+    # If a sibling part isn't downloaded/present locally, aggregation can only
+    # use what's there; layout must still say "sharded" (via the split.count
+    # KV fallback), not silently look complete.
+    part1 = _write_shard(
+        tmp_path,
+        1,
+        2,
+        kv={"general.architecture": "llama", "llama.block_count": 4, "split.count": 2},
+        tensors={"token_embd.weight": ([16, 8], "F32")},
+    )
+    src = ExtractionSource(root=tmp_path, repo_files=[part1])
+    claims = {c.field_path: c.value for c in GGUFExtractor().extract(src).claims}
+
+    assert claims["identity.file_layout"] == "sharded"
+    assert claims["parameters.total"] == 16 * 8  # only the one local part
+
+
+def test_gguf_distinct_quant_variants_not_merged(tmp_path: Path):
+    # Two independent quantizations of the same model living in one repo must
+    # not be mistaken for split parts of each other.
+    write_gguf(
+        tmp_path / "model-Q4_K_M.gguf",
+        kv={"general.architecture": "llama", "llama.block_count": 4},
+        tensors={"token_embd.weight": ([16, 8], "F32")},
+    )
+    write_gguf(
+        tmp_path / "model-Q8_0.gguf",
+        kv={"general.architecture": "llama", "llama.block_count": 4},
+        tensors={"token_embd.weight": ([16, 8], "F32"), "output.weight": ([16, 8], "F32")},
+    )
+    src = ExtractionSource(
+        root=tmp_path, repo_files=["model-Q4_K_M.gguf", "model-Q8_0.gguf"]
+    )
+    claims = {c.field_path: c.value for c in GGUFExtractor().extract(src).claims}
+
+    assert claims["identity.file_layout"] == "single"
+    assert claims["parameters.total"] == 16 * 8  # only the anchor file's own tensor

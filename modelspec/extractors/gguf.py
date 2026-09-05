@@ -172,26 +172,57 @@ _TOKENIZER_MODEL_MAP = {
     "t5": "Unigram",
 }
 
-# llama.cpp's gguf-split names shards "<name>-00001-of-00005.gguf".
-_SPLIT_FILENAME_RE = re.compile(r"-\d+-of-(\d+)\.gguf$", re.IGNORECASE)
+# llama.cpp's gguf-split names shards "<name>-00001-of-00005.gguf". Distinct
+# quantization variants of the same model living in one repo (e.g. Q4_K_M.gguf
+# and Q8_0.gguf) do NOT match this — only files sharing both the prefix and the
+# total-part count are siblings of one split.
+_SPLIT_FILENAME_RE = re.compile(r"^(?P<prefix>.+)-(?P<no>\d+)-of-(?P<total>\d+)\.gguf$", re.IGNORECASE)
+
+
+def _split_match(filename: str) -> re.Match | None:
+    return _SPLIT_FILENAME_RE.match(filename.rsplit("/", 1)[-1])
 
 
 def _is_sharded(fields: dict[str, Any], filename: str) -> bool:
-    """Detect a multi-part GGUF split.
+    """Detect a multi-part GGUF split from a single part's own header.
 
-    We only ever read one part (the extractor does not aggregate tensors across
-    shards yet), so this exists to avoid mislabeling ``identity.file_layout`` as
-    "single" when the file is actually one part of a split. Two independent
-    signals: the ``split.count`` KV a split-aware writer embeds in every part,
-    and the "-NNNNN-of-MMMMM.gguf" filename convention gguf-split uses.
+    Used as a fallback when sibling parts can't be located by filename (custom
+    naming, or a ``split.count`` KV with no "-NNNNN-of-MMMMM" pattern) so
+    ``identity.file_layout`` still reads "sharded" instead of silently "single".
     """
     count = fields.get("split.count")
     if isinstance(count, int) and count > 1:
         return True
-    m = _SPLIT_FILENAME_RE.search(filename)
-    if m and int(m.group(1)) > 1:
+    m = _split_match(filename)
+    if m and int(m.group("total")) > 1:
         return True
     return False
+
+
+def _sibling_shards(source: ExtractionSource, anchor_file: str) -> list[str]:
+    """All locally-available repo files that are other parts of anchor_file's split.
+
+    Matches on the shared "<prefix>-NNNNN-of-MMMMM.gguf" naming convention;
+    returns just ``[anchor_file]`` when the name doesn't fit that pattern or no
+    sibling parts are present. Order is by part number, so index 0 is always
+    the "-00001-of-*" part carrying the full architecture metadata.
+    """
+    m = _split_match(anchor_file)
+    if m is None:
+        return [anchor_file]
+    prefix, total = re.escape(m.group("prefix")), re.escape(m.group("total"))
+    pattern = re.compile(rf"^{prefix}-(\d+)-of-{total}\.gguf$", re.IGNORECASE)
+    shards: list[tuple[int, str]] = []
+    for f in source.repo_files:
+        if not source.has(f):
+            continue
+        m2 = pattern.match(f.rsplit("/", 1)[-1])
+        if m2:
+            shards.append((int(m2.group(1)), f))
+    if not shards:
+        return [anchor_file]
+    shards.sort(key=lambda t: t[0])
+    return [f for _, f in shards]
 
 
 class GGUFExtractor:
@@ -202,19 +233,34 @@ class GGUFExtractor:
             return False
         return any(f.endswith(".gguf") and source.has(f) for f in source.repo_files)
 
-    def _gguf_path(self, source: ExtractionSource):
+    def _gguf_anchor_file(self, source: ExtractionSource) -> str | None:
         for f in source.repo_files:
             if f.endswith(".gguf") and source.has(f):
-                return source.path(f)
+                return f
         return None
 
     def extract(self, source: ExtractionSource) -> ExtractorResult:
-        path = self._gguf_path(source)
-        if path is None:
+        anchor_file = self._gguf_anchor_file(source)
+        if anchor_file is None:
             return ExtractorResult()
 
-        with open(path, "rb") as f:
+        # shard_files[0] is the "-00001-of-*" part (or the only file, if this
+        # isn't a split at all) — it carries the full architecture metadata.
+        shard_files = _sibling_shards(source, anchor_file)
+        primary_file = shard_files[0]
+
+        with open(source.path(primary_file), "rb") as f:
             fields, tensors = parse_gguf_header(f)
+
+        for shard in shard_files[1:]:
+            with open(source.path(shard), "rb") as f:
+                shard_fields, shard_tensors = parse_gguf_header(f)
+            tensors = tensors + shard_tensors
+            for key, value in shard_fields.items():
+                fields.setdefault(key, value)
+
+        path = source.path(primary_file)
+        sharded = len(shard_files) > 1 or _is_sharded(fields, anchor_file.rsplit("/", 1)[-1])
 
         claims: list[FieldClaim] = []
 
@@ -328,7 +374,7 @@ class GGUFExtractor:
             if "imat" in path.name.lower():
                 claims.append(FieldClaim("quantization.has_imatrix", True, "heuristic", "low"))
 
-        file_layout = "sharded" if _is_sharded(fields, path.name) else "single"
+        file_layout = "sharded" if sharded else "single"
         claims.append(FieldClaim("identity.file_layout", file_layout, "gguf", "high"))
         claims.append(FieldClaim("architecture.tags", tags, "inferred", "medium"))
 
