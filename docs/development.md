@@ -26,6 +26,10 @@ modelspec extract ./model --offline --format yaml -o spec.yaml
 # include full provenance (per_field + raw_config_json)
 modelspec extract ./model --offline --show-provenance
 
+# split download from analysis: fetch metadata + a manifest, analyze later/offline
+modelspec extract meta-llama/Llama-3.1-8B-Instruct --download-only
+modelspec extract meta-llama/Llama-3.1-8B-Instruct --analysis-only
+
 # export the JSON Schema
 modelspec schema
 
@@ -78,6 +82,7 @@ for each `can_handle` extractor, call `extract` and collect `FieldClaim`s (the G
 - Remote downloads fetch headers only: safetensors fetches the first `8+n` bytes, GGUF fetches a prefix (default 24MB, covering header + tensor info); an oversized KV (very rare) may be truncated, but local files have no such limit. Per-file/per-shard downloads run **concurrently** (`_FETCH_WORKERS`, default 16), so a 685B model with 160+ shards extracts in ~15s; a single failed download fails the target (matching the old sequential behaviour).
 - **Global download concurrency cap** (`_MAX_CONCURRENT_DOWNLOADS`, default 16): a process-wide semaphore bounds *total* simultaneous downloads across the whole batch. Without it, batch `--workers` × per-target `_FETCH_WORKERS` is multiplicative and exhausts file descriptors / connections at corpus scale (`[Errno 24] Too many open files`, `Max retries exceeded`). GGUF parsing self-reads the header (`parse_gguf_header`), never `GGUFReader`.
 - **Range robustness**: if the HF CDN ignores the `Range` header and returns `200` (the whole file), `io/hf_fetcher._read_prefix` streams the body and disconnects once it has the target bytes, so it never downloads multi-GB weights in full. Supports `HF_TOKEN` for higher rate limits.
+- **`extract --download-only` / `--analysis-only`**: `io/hf_fetcher.download_metadata` is the persistent-directory sibling of `fetch_metadata` (same file selection, but writes to a caller-supplied dir instead of a temp dir that gets cleaned up) and also resolves the commit `revision` pointed to plus per-file `oid`/`sha256` (best-effort, via `HfApi.model_info` / `list_repo_tree`) so `render_manifest`'s `MODELSPEC_MANIFEST.md` can prove which exact upstream file version a header-only download came from. `orchestrator.extract`'s local-directory path reads `identity.repo_id` back out of that manifest when present.
 - The third LLM tier of license identification is currently a hook (no model wired up); the `--no-license-llm` option is reserved.
 - The `io` sub-package name collides with the stdlib `io` but doesn't conflict (absolute import `modelspec.io`).
 

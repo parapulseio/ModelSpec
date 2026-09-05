@@ -30,6 +30,8 @@ Call `huggingface_hub.list_repo_files()` to list the repo's files, classify by f
 
 **No weights, metadata only.** For safetensors, use an HTTP Range request for the header only (the first 8 bytes give the JSON header length, usually a few hundred KB + buffer). An 8B model's weights are 16GB but the actual download is ~a few MB. Per-shard header fetches run **concurrently** (`_FETCH_WORKERS`), so a 685B model with 160+ shards still completes in ~15s.
 
+`fetch_metadata` downloads into a temp dir that's cleaned up after extraction (the normal one-shot `extract` path). `modelspec extract --download-only` instead calls the sibling `download_metadata`, which downloads the same files into a persistent directory and writes a `MODELSPEC_MANIFEST.md` (repo_id / resolved commit SHA / per-file content hashes / what was fetched vs. skipped); `--analysis-only` then runs steps 3–7 below against that directory with no network. See [cli.md](cli.md).
+
 ## 3. Parallel parsing
 
 Each extractor runs independently and returns a flat list of `FieldClaim(field_path, value, source, confidence)`. Flat rather than nested keeps merging simple.

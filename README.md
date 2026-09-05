@@ -90,6 +90,11 @@ modelspec extract /path/to/model/dir --offline      # HF or GGUF layout
 modelspec extract ./model --offline --format yaml -o spec.yaml
 modelspec extract ./model --offline --show-provenance   # per-field sources + raw config
 
+# Split download from analysis: fetch metadata + a manifest (with commit/file
+# hashes as evidence), then analyze the downloaded directory offline
+modelspec extract meta-llama/Llama-3.1-8B-Instruct --download-only
+modelspec extract meta-llama/Llama-3.1-8B-Instruct --analysis-only
+
 # Export the JSON Schema, or explain a field
 modelspec schema
 modelspec explain head_dim          # type, choices, description (from the schema)
@@ -112,6 +117,9 @@ modelspec coverage repos.txt --workers 8 --delay 0.3 --format json > report.json
 | `--revision REV` | Commit / branch / tag |
 | `--show-provenance` | Include full provenance (`per_field`, `raw_config_json`) |
 | `--strict` | Non-zero exit if any cross-field warning fires |
+| `--download-only` | Only fetch metadata to `--output-dir` + write a manifest; don't analyze |
+| `--analysis-only` | Only analyze `repo_id` as an already-downloaded local directory; no network |
+| `--output-dir DIR` | Destination directory for `--download-only` (default: `./<repo_id>`) |
 
 `batch` / `coverage` (see [docs/analytics.md](docs/analytics.md)): `--workers N`,
 `--limit N`, `--target-timeout S`, `--delay S` (throttle the Hub request rate),
@@ -159,7 +167,7 @@ decoder_llm_quants = list(filter_specs(specs, all_of(
 ## Run the tests
 
 ```bash
-pytest -q     # 104 tests; no network, no Pydantic mocking
+pytest -q     # 123 tests; no network, no Pydantic mocking
 ```
 
 Extractors are fed fixture files (`tests/conftest.py` writes header-only
