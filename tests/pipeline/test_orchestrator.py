@@ -74,6 +74,32 @@ def test_offline_rejects_nonexistent(tmp_path: Path):
         extract("meta-llama/Llama-3.1-8B", offline=True)
 
 
+def test_local_dir_recovers_repo_id_from_download_manifest(tmp_path: Path):
+    # Simulates a directory previously produced by `--download-only`: the local
+    # path is meaningless, but the manifest records the real HF repo_id.
+    write_config(
+        tmp_path / "config.json",
+        {"architectures": ["LlamaForCausalLM"], "num_hidden_layers": 2},
+    )
+    (tmp_path / "MODELSPEC_MANIFEST.md").write_text(
+        "# ModelSpec download manifest\n\n- repo_id: org/some-model\n- revision: main\n",
+        encoding="utf-8",
+    )
+    spec = extract(str(tmp_path), offline=True)
+    assert spec.identity.repo_id == "org/some-model"
+    # the manifest itself must not leak into the extracted file listing
+    assert "MODELSPEC_MANIFEST.md" not in spec.provenance.unknown_fields
+
+
+def test_local_dir_without_manifest_uses_path_as_repo_id(tmp_path: Path):
+    write_config(
+        tmp_path / "config.json",
+        {"architectures": ["LlamaForCausalLM"], "num_hidden_layers": 2},
+    )
+    spec = extract(str(tmp_path), offline=True)
+    assert spec.identity.repo_id == str(tmp_path)
+
+
 def test_merged_quantized_model_end_to_end(tmp_path: Path):
     # A merge (mergekit_config.yml) + AWQ quantization (config.json) — the two
     # orthogonal structures must coexist on one spec.

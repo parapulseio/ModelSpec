@@ -43,16 +43,7 @@ def _render(data: dict[str, Any], fmt: str) -> str:
     return json.dumps(data, indent=2, ensure_ascii=False)
 
 
-def _cmd_extract(args: argparse.Namespace) -> int:
-    try:
-        spec = extract(args.repo_id, revision=args.revision, offline=args.offline)
-    except FileNotFoundError as e:
-        print(f"error: {e}", file=sys.stderr)
-        return 2
-    except Exception as e:  # network / parse / validation
-        print(f"error: extraction failed: {e}", file=sys.stderr)
-        return 1
-
+def _finish_extract(spec: ModelSpec, args: argparse.Namespace) -> int:
     if args.strict and spec.provenance.warnings:
         for w in spec.provenance.warnings:
             print(f"warning: {w}", file=sys.stderr)
@@ -67,6 +58,81 @@ def _cmd_extract(args: argparse.Namespace) -> int:
     else:
         print(out)
     return 0
+
+
+def _cmd_extract_download_only(args: argparse.Namespace) -> int:
+    if args.offline:
+        print("error: --download-only needs network access; drop --offline", file=sys.stderr)
+        return 2
+    if Path(args.repo_id).is_dir():
+        print(
+            f"error: {args.repo_id!r} is a local directory; --download-only fetches "
+            "from the HF Hub — pass a repo id instead",
+            file=sys.stderr,
+        )
+        return 2
+
+    from modelspec.io.hf_fetcher import MANIFEST_FILENAME, download_metadata, render_manifest
+
+    dest_dir = Path(args.output_dir) if args.output_dir else Path(args.repo_id)
+    try:
+        result = download_metadata(args.repo_id, revision=args.revision, dest_dir=dest_dir)
+    except Exception as e:  # network / HTTP errors
+        print(f"error: download failed: {e}", file=sys.stderr)
+        return 1
+
+    manifest = render_manifest(
+        repo_id=args.repo_id,
+        revision=args.revision,
+        dest_dir=dest_dir,
+        commit_sha=result.commit_sha,
+        entries=result.files,
+    )
+    (dest_dir / MANIFEST_FILENAME).write_text(manifest, encoding="utf-8")
+
+    n_downloaded = sum(1 for e in result.files if e.kind != "skipped")
+    print(f"downloaded {n_downloaded} file(s) to {dest_dir}/", file=sys.stderr)
+    print(f"manifest: {dest_dir / MANIFEST_FILENAME}", file=sys.stderr)
+    return 0
+
+
+def _cmd_extract_analysis_only(args: argparse.Namespace) -> int:
+    path = Path(args.repo_id)
+    if not path.is_dir():
+        print(
+            f"error: {args.repo_id!r} is not a local directory; --analysis-only "
+            "only reads metadata already on disk — run "
+            f"'modelspec extract {args.repo_id} --download-only' first",
+            file=sys.stderr,
+        )
+        return 2
+
+    try:
+        spec = extract(str(path), offline=True)
+    except Exception as e:  # parse / validation
+        print(f"error: extraction failed: {e}", file=sys.stderr)
+        return 1
+    return _finish_extract(spec, args)
+
+
+def _cmd_extract(args: argparse.Namespace) -> int:
+    if args.download_only and args.analysis_only:
+        print("error: --download-only and --analysis-only are mutually exclusive", file=sys.stderr)
+        return 2
+    if args.download_only:
+        return _cmd_extract_download_only(args)
+    if args.analysis_only:
+        return _cmd_extract_analysis_only(args)
+
+    try:
+        spec = extract(args.repo_id, revision=args.revision, offline=args.offline)
+    except FileNotFoundError as e:
+        print(f"error: {e}", file=sys.stderr)
+        return 2
+    except Exception as e:  # network / parse / validation
+        print(f"error: extraction failed: {e}", file=sys.stderr)
+        return 1
+    return _finish_extract(spec, args)
 
 
 def _cmd_schema(args: argparse.Namespace) -> int:
@@ -114,7 +180,7 @@ _modelspec_complete() {
         return
     fi
     case "${COMP_WORDS[1]}" in
-        extract) COMPREPLY=( $(compgen -W "--format -o --output --offline --revision --show-provenance --strict" -- "$cur") );;
+        extract) COMPREPLY=( $(compgen -W "--format -o --output --offline --revision --show-provenance --strict --download-only --analysis-only --output-dir" -- "$cur") );;
         batch|coverage) COMPREPLY=( $(compgen -W "--offline --revision --workers --limit --target-timeout --delay --format --top --quiet --output-dir" -- "$cur") );;
         explain) COMPREPLY=( $(compgen -W "--format" -- "$cur") );;
         completion) COMPREPLY=( $(compgen -W "bash zsh fish" -- "$cur") );;
@@ -133,7 +199,7 @@ _modelspec() {
         return
     fi
     case $words[2] in
-        extract) compadd -- --format -o --output --offline --revision --show-provenance --strict;;
+        extract) compadd -- --format -o --output --offline --revision --show-provenance --strict --download-only --analysis-only --output-dir;;
         batch|coverage) compadd -- --offline --revision --workers --limit --target-timeout --delay --format --top --quiet --output-dir;;
         explain) compadd -- --format;;
         completion) compadd -- bash zsh fish;;
@@ -274,6 +340,11 @@ examples:
   # a local directory, offline, failing CI on any cross-field warning
   modelspec extract ./models/my-model --offline --strict
 
+  # split download from analysis: fetch metadata + write a manifest, no analysis
+  modelspec extract meta-llama/Llama-3.1-8B-Instruct --download-only
+  # ... then analyze the downloaded directory, no network
+  modelspec extract meta-llama/Llama-3.1-8B-Instruct --analysis-only
+
   # batch a corpus and see which raw keys are still uncovered
   modelspec batch repos.txt --top 30
 
@@ -304,7 +375,9 @@ def build_parser() -> argparse.ArgumentParser:
         description="Download a model's metadata and emit a normalized ModelSpec.",
         epilog="examples:\n"
         "  modelspec extract meta-llama/Llama-3.1-8B-Instruct\n"
-        "  modelspec extract ./local/dir --offline --show-provenance\n",
+        "  modelspec extract ./local/dir --offline --show-provenance\n"
+        "  modelspec extract meta-llama/Llama-3.1-8B-Instruct --download-only\n"
+        "  modelspec extract meta-llama/Llama-3.1-8B-Instruct --analysis-only\n",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     p_extract.add_argument("repo_id", help="HF repo id (e.g. meta-llama/Llama-3.1-8B) or local path")
@@ -317,6 +390,20 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_extract.add_argument(
         "--strict", action="store_true", help="non-zero exit if any cross-field warning fires"
+    )
+    p_extract.add_argument(
+        "--download-only",
+        action="store_true",
+        help="only download metadata to --output-dir + write a manifest; don't analyze",
+    )
+    p_extract.add_argument(
+        "--analysis-only",
+        action="store_true",
+        help="only analyze repo_id as an already-downloaded local directory; no network",
+    )
+    p_extract.add_argument(
+        "--output-dir",
+        help="destination directory for --download-only (default: ./<repo_id>)",
     )
     p_extract.set_defaults(func=_cmd_extract)
 
