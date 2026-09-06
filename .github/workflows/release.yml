@@ -43,8 +43,16 @@ jobs:
       - name: Build sdist + wheel
         run: python -m build
 
+      - name: Export the JSON Schema
+        # A standalone, versioned artifact for third parties who only want to
+        # validate ModelSpec documents (e.g. via `modelspec verify` or any
+        # generic JSON Schema tool) without installing the Python package.
+        run: modelspec schema > modelspec.schema.json
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           generate_release_notes: true
-          files: dist/*
+          files: |
+            dist/*
+            modelspec.schema.json

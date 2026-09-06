@@ -87,6 +87,8 @@ Set `HF_TOKEN` (exported!) for authenticated, higher-rate Hub access:
 pip install "git+https://github.com/parapulseio/ModelSpec.git@v0.1.0"
 ```
 
+Each [GitHub Release](https://github.com/parapulseio/ModelSpec/releases) also attaches a standalone `modelspec.schema.json` — useful for validating `ModelSpec` documents (e.g. via `modelspec verify` or any generic JSON Schema tool) against that exact version without installing the Python package.
+
 ## Usage
 
 ```bash

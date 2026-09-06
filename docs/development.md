@@ -94,7 +94,7 @@ The version number is **not** hardcoded anywhere in the source — `[tool.hatch.
 - **Between tags**, it's a PEP 440 dev version like `0.2.1.dev3+g1a2b3c4` (3 commits past `v0.2.0`, at commit `1a2b3c4`) — this is expected and not a bug; it just means "not a release."
 - A fresh `pip install -e .` (or any rebuild) is required to pick up a newly-created tag, since the version is resolved at build/install time, not read live from git on every import.
 
-**Cutting a release** (maintainers): tag `main` and push the tag — `.github/workflows/release.yml` runs the test suite, refuses to release if the resolved version is a dirty/dev string (i.e. the tag doesn't point at a clean, exact commit), builds the sdist + wheel, and publishes a GitHub Release with those artifacts attached and auto-generated notes.
+**Cutting a release** (maintainers): tag `main` and push the tag — `.github/workflows/release.yml` runs the test suite, refuses to release if the resolved version is a dirty/dev string (i.e. the tag doesn't point at a clean, exact commit), builds the sdist + wheel, exports the JSON Schema (`modelspec schema > modelspec.schema.json`), and publishes a GitHub Release with all three attached plus auto-generated notes. The standalone schema file lets third parties validate `ModelSpec` documents against a specific released version (e.g. with `modelspec verify`, or any generic JSON Schema tool) without installing the Python package at all.
 
 ```bash
 git tag v0.2.0
