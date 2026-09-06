@@ -1,10 +1,10 @@
 [build-system]
-requires = ["hatchling"]
+requires = ["hatchling", "hatch-vcs"]
 build-backend = "hatchling.build"
 
 [project]
 name = "modelspec"
-version = "0.1.0"
+dynamic = ["version"]
 description = "ParaPulse ModelSpec — extract and normalize LLM model specifications from multiple sources"
 readme = "docs/overview.md"
 requires-python = ">=3.10"
@@ -26,6 +26,12 @@ modelspec = "modelspec.cli:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["modelspec"]
+
+[tool.hatch.version]
+source = "vcs"
+# Lets `pip install -e .` work in a shallow clone / tarball with no tags
+# (e.g. some CI checkouts) instead of hard-failing on version resolution.
+fallback-version = "0.0.0"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

@@ -81,6 +81,12 @@ pip install -e ".[dev]"        # package + pytest + PyYAML + gguf
 Set `HF_TOKEN` (exported!) for authenticated, higher-rate Hub access:
 `export HF_TOKEN=hf_...`.
 
+**Pinning a version from another project** (releases are git tags, not published to PyPI — see [docs/development.md](docs/development.md#versioning--releases)):
+
+```bash
+pip install "git+https://github.com/parapulseio/ModelSpec.git@v0.1.0"
+```
+
 ## Usage
 
 ```bash
