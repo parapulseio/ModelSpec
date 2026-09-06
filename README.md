@@ -105,7 +105,7 @@ modelspec extract meta-llama/Llama-3.1-8B-Instruct --analysis-only
 
 # Export the JSON Schema, validate a file against it, or explain a field
 modelspec schema
-modelspec verify spec.json          # validates against ModelSpec.model_json_schema()
+modelspec verify spec.json          # validates against the schema above ($schema/$id/$comment-annotated)
 modelspec explain head_dim          # type, choices, description (from the schema)
 modelspec completion bash           # shell tab-completion script
 
@@ -176,7 +176,7 @@ decoder_llm_quants = list(filter_specs(specs, all_of(
 ## Run the tests
 
 ```bash
-pytest -q     # 128 tests; no network, no Pydantic mocking
+pytest -q     # 129 tests; no network, no Pydantic mocking
 ```
 
 Extractors are fed fixture files (`tests/conftest.py` writes header-only

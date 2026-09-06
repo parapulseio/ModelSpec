@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError
 
-from modelspec.schema import ModelSpec
+from modelspec.schema import ModelSpec, export_json_schema
 
 
 def test_minimal_dict_validates():
@@ -53,6 +53,23 @@ def test_json_schema_has_descriptions():
     # Nested sub-model fields too.
     attention = schema["$defs"]["Attention"]
     assert "MLA" in attention["properties"]["num_kv_heads"]["description"]
+
+
+def test_export_json_schema_is_annotated_for_standalone_use():
+    from modelspec import __version__
+
+    schema = export_json_schema()
+    # standard JSON Schema identity/versioning keywords, absent from the bare
+    # model_json_schema() output
+    assert schema["$schema"] == "https://json-schema.org/draft/2020-12/schema"
+    assert schema["$id"].endswith(f"v{__version__}/modelspec.schema.json")
+    assert __version__ in schema["$comment"]
+    # a human-readable explanation of what this schema is
+    assert "ModelSpec" in schema["description"]
+    # everything model_json_schema() itself produces is still present
+    assert schema["title"] == "ModelSpec"
+    assert "identity" in schema["properties"]
+    assert schema["$defs"] == ModelSpec.model_json_schema()["$defs"]
 
 
 def test_not_applicable_field():

@@ -14,7 +14,7 @@ from typing import Any
 
 from modelspec import __version__
 from modelspec.pipeline import extract
-from modelspec.schema import ModelSpec
+from modelspec.schema import ModelSpec, export_json_schema
 
 
 def _to_output_dict(spec: ModelSpec, show_provenance: bool) -> dict[str, Any]:
@@ -136,7 +136,7 @@ def _cmd_extract(args: argparse.Namespace) -> int:
 
 
 def _cmd_schema(args: argparse.Namespace) -> int:
-    print(json.dumps(ModelSpec.model_json_schema(), indent=2, ensure_ascii=False))
+    print(json.dumps(export_json_schema(), indent=2, ensure_ascii=False))
     return 0
 
 
@@ -189,7 +189,7 @@ def _cmd_verify(args: argparse.Namespace) -> int:
         print(f"error: cannot parse {path} as {fmt}: {e}", file=sys.stderr)
         return 2
 
-    schema = ModelSpec.model_json_schema()
+    schema = export_json_schema()
     validator = jsonschema.Draft202012Validator(schema)
     errors = sorted(validator.iter_errors(data), key=lambda e: [str(p) for p in e.path])
 

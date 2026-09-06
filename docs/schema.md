@@ -106,7 +106,7 @@ ModelSpec
 - `raw_gguf_kv: dict | None`
 - `unknown_fields: list[str]` — fields present in raw but covered by neither canonical nor passthrough (the auto feedback loop)
 
-> **Self-documenting schema**: every field carries a Pydantic `Field(description=...)`, so `model_json_schema()` export includes descriptions (UI tooltips, generated forms).
+> **Self-documenting schema**: every field carries a Pydantic `Field(description=...)`, so `model_json_schema()` export includes descriptions (UI tooltips, generated forms). `modelspec.schema.export_json_schema()` (what `modelspec schema` / `modelspec verify` actually use) wraps this with `$schema` / `$id` / `$comment` so a schema file handed to a third party is self-identifying — see [cli.md](cli.md#schema--export-the-json-schema).
 
 ## FieldClaim — the connection point between extractor and schema
 
