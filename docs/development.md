@@ -7,8 +7,8 @@ Requires Python ≥ 3.10.
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
-pip install -e ".[dev]"        # the package + pytest + PyYAML + gguf (dev includes gguf for testing)
-# optional: pip install -e ".[all]"  # extra runtime gguf / yaml
+pip install -e ".[dev]"        # the package + pytest + PyYAML + gguf + jsonschema (dev includes these for testing)
+# optional: pip install -e ".[all]"  # extra runtime gguf / yaml / verify
 ```
 
 ## Running the CLI
@@ -30,8 +30,9 @@ modelspec extract ./model --offline --show-provenance
 modelspec extract meta-llama/Llama-3.1-8B-Instruct --download-only
 modelspec extract meta-llama/Llama-3.1-8B-Instruct --analysis-only
 
-# export the JSON Schema
+# export the JSON Schema, or validate a file against it
 modelspec schema
+modelspec verify spec.json
 
 # batch extraction + coverage dashboard (M4)
 modelspec batch repos.txt --offline --output-dir specs/
@@ -83,6 +84,7 @@ for each `can_handle` extractor, call `extract` and collect `FieldClaim`s (the G
 - **Global download concurrency cap** (`_MAX_CONCURRENT_DOWNLOADS`, default 16): a process-wide semaphore bounds *total* simultaneous downloads across the whole batch. Without it, batch `--workers` × per-target `_FETCH_WORKERS` is multiplicative and exhausts file descriptors / connections at corpus scale (`[Errno 24] Too many open files`, `Max retries exceeded`). GGUF parsing self-reads the header (`parse_gguf_header`), never `GGUFReader`.
 - **Range robustness**: if the HF CDN ignores the `Range` header and returns `200` (the whole file), `io/hf_fetcher._read_prefix` streams the body and disconnects once it has the target bytes, so it never downloads multi-GB weights in full. Supports `HF_TOKEN` for higher rate limits.
 - **`extract --download-only` / `--analysis-only`**: `io/hf_fetcher.download_metadata` is the persistent-directory sibling of `fetch_metadata` (same file selection, but writes to a caller-supplied dir instead of a temp dir that gets cleaned up) and also resolves the commit `revision` pointed to plus per-file `oid`/`sha256` (best-effort, via `HfApi.model_info` / `list_repo_tree`) so `render_manifest`'s `MODELSPEC_MANIFEST.md` can prove which exact upstream file version a header-only download came from. `orchestrator.extract`'s local-directory path reads `identity.repo_id` back out of that manifest when present.
+- **`verify`**: standalone schema validation over a plain JSON/YAML file (`_cmd_verify` in `cli.py`) — no dependency on `extract`'s pipeline, so it also validates hand-edited or third-party documents. Uses `jsonschema.Draft202012Validator` against `ModelSpec.model_json_schema()`, matching Pydantic v2's target draft. `jsonschema` is an optional dependency (the `verify` extra, included in `dev`); missing it prints an actionable install hint rather than a traceback.
 - The third LLM tier of license identification is currently a hook (no model wired up); the `--no-license-llm` option is reserved.
 - The `io` sub-package name collides with the stdlib `io` but doesn't conflict (absolute import `modelspec.io`).
 

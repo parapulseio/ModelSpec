@@ -140,6 +140,70 @@ def _cmd_schema(args: argparse.Namespace) -> int:
     return 0
 
 
+def _infer_doc_format(path: Path, explicit: str | None) -> str:
+    if explicit:
+        return explicit
+    return "yaml" if path.suffix.lower() in (".yaml", ".yml") else "json"
+
+
+def _load_document(path: Path, fmt: str) -> Any:
+    text = path.read_text(encoding="utf-8")
+    if fmt == "yaml":
+        import yaml  # already a hard requirement of --format yaml elsewhere
+
+        return yaml.safe_load(text)
+    return json.loads(text)
+
+
+def _cmd_verify(args: argparse.Namespace) -> int:
+    """Validate a previously-extracted ModelSpec document against the live schema.
+
+    Independent of `extract`: reads plain JSON/YAML off disk and checks it with
+    a standard JSON Schema validator, so it also catches a document that was
+    hand-edited, produced by another tool, or extracted with an older/newer
+    version of modelspec than the schema installed here.
+    """
+    try:
+        import jsonschema
+    except ImportError:
+        print(
+            "error: verify requires jsonschema (pip install 'modelspec[verify]')",
+            file=sys.stderr,
+        )
+        return 2
+
+    path = Path(args.file)
+    fmt = _infer_doc_format(path, args.format)
+    try:
+        data = _load_document(path, fmt)
+    except ImportError:
+        print(
+            "error: --format yaml requires PyYAML (pip install 'modelspec[yaml]')",
+            file=sys.stderr,
+        )
+        return 2
+    except OSError as e:
+        print(f"error: cannot read {path}: {e}", file=sys.stderr)
+        return 2
+    except Exception as e:  # json.JSONDecodeError / yaml.YAMLError
+        print(f"error: cannot parse {path} as {fmt}: {e}", file=sys.stderr)
+        return 2
+
+    schema = ModelSpec.model_json_schema()
+    validator = jsonschema.Draft202012Validator(schema)
+    errors = sorted(validator.iter_errors(data), key=lambda e: [str(p) for p in e.path])
+
+    if not errors:
+        print(f"valid: {path} conforms to the ModelSpec schema")
+        return 0
+
+    print(f"invalid: {path} does not conform to the ModelSpec schema", file=sys.stderr)
+    for e in errors:
+        loc = "/".join(str(p) for p in e.path) or "<root>"
+        print(f"  {loc}: {e.message}", file=sys.stderr)
+    return 1
+
+
 def _cmd_explain(args: argparse.Namespace) -> int:
     from modelspec.explain import explain_field, field_catalog
 
@@ -174,13 +238,14 @@ _COMPLETIONS = {
 _modelspec_complete() {
     local cur prev words cword
     _init_completion 2>/dev/null || { cur="${COMP_WORDS[COMP_CWORD]}"; }
-    local cmds="extract schema batch coverage explain completion"
+    local cmds="extract schema verify batch coverage explain completion"
     if [ "$COMP_CWORD" -eq 1 ]; then
         COMPREPLY=( $(compgen -W "$cmds --help --version" -- "$cur") )
         return
     fi
     case "${COMP_WORDS[1]}" in
         extract) COMPREPLY=( $(compgen -W "--format -o --output --offline --revision --show-provenance --strict --download-only --analysis-only --output-dir" -- "$cur") );;
+        verify) COMPREPLY=( $(compgen -W "--format" -- "$cur") );;
         batch|coverage) COMPREPLY=( $(compgen -W "--offline --revision --workers --limit --target-timeout --delay --format --top --quiet --output-dir" -- "$cur") );;
         explain) COMPREPLY=( $(compgen -W "--format" -- "$cur") );;
         completion) COMPREPLY=( $(compgen -W "bash zsh fish" -- "$cur") );;
@@ -193,13 +258,14 @@ complete -F _modelspec_complete modelspec
 #   source <(modelspec completion zsh)
 _modelspec() {
     local -a cmds
-    cmds=(extract schema batch coverage explain completion)
+    cmds=(extract schema verify batch coverage explain completion)
     if (( CURRENT == 2 )); then
         compadd -- $cmds --help --version
         return
     fi
     case $words[2] in
         extract) compadd -- --format -o --output --offline --revision --show-provenance --strict --download-only --analysis-only --output-dir;;
+        verify) compadd -- --format;;
         batch|coverage) compadd -- --offline --revision --workers --limit --target-timeout --delay --format --top --quiet --output-dir;;
         explain) compadd -- --format;;
         completion) compadd -- bash zsh fish;;
@@ -213,6 +279,7 @@ compdef _modelspec modelspec
 complete -c modelspec -f
 complete -c modelspec -n __fish_use_subcommand -a extract -d 'extract a ModelSpec'
 complete -c modelspec -n __fish_use_subcommand -a schema -d 'print the JSON Schema'
+complete -c modelspec -n __fish_use_subcommand -a verify -d 'validate a ModelSpec file against the schema'
 complete -c modelspec -n __fish_use_subcommand -a batch -d 'batch extract + report'
 complete -c modelspec -n __fish_use_subcommand -a coverage -d 'coverage dashboard'
 complete -c modelspec -n __fish_use_subcommand -a explain -d 'explain a schema field'
@@ -345,6 +412,9 @@ examples:
   # ... then analyze the downloaded directory, no network
   modelspec extract meta-llama/Llama-3.1-8B-Instruct --analysis-only
 
+  # validate an extracted (or hand-edited, or third-party) ModelSpec file
+  modelspec verify spec.yaml --format yaml
+
   # batch a corpus and see which raw keys are still uncovered
   modelspec batch repos.txt --top 30
 
@@ -409,6 +479,26 @@ def build_parser() -> argparse.ArgumentParser:
 
     p_schema = sub.add_parser("schema", help="print the ModelSpec JSON Schema")
     p_schema.set_defaults(func=_cmd_schema)
+
+    p_verify = sub.add_parser(
+        "verify",
+        help="validate a ModelSpec JSON/YAML file against the schema",
+        description="Check a previously-extracted (or hand-edited, or "
+        "third-party) ModelSpec document against the live JSON Schema — "
+        "catches type errors, bad enum values, and invalid discriminated "
+        "unions (e.g. quantization).",
+        epilog="examples:\n"
+        "  modelspec verify llama.json\n"
+        "  modelspec verify spec.yaml --format yaml\n",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    p_verify.add_argument("file", help="path to a ModelSpec JSON or YAML file")
+    p_verify.add_argument(
+        "--format",
+        choices=["json", "yaml"],
+        help="input format (default: infer from file extension, else json)",
+    )
+    p_verify.set_defaults(func=_cmd_verify)
 
     p_batch = sub.add_parser(
         "batch", help="extract many models; report unknown_fields frequency"
