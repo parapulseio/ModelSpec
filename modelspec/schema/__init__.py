@@ -6,6 +6,7 @@ from modelspec.schema.spec import (
     AWQQuant,
     Context,
     Conflict,
+    export_json_schema,
     FieldProvenance,
     GGUFQuant,
     GPTQQuant,
@@ -24,6 +25,7 @@ from modelspec.schema.spec import (
 
 __all__ = [
     "ModelSpec",
+    "export_json_schema",
     "Identity",
     "Lineage",
     "Architecture",
