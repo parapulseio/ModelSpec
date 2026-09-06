@@ -1,6 +1,6 @@
 # Command-Line Interface
 
-> **Status**: `extract` (with `--format` / `-o` / `--offline` / `--revision` / `--show-provenance` / `--strict` / `--download-only` / `--analysis-only` / `--output-dir`), `schema`, `batch`, and `coverage` are all implemented (`modelspec/cli.py`). `extract` already wires in the six source types + quantization/merge + cross-validation. `--db` was cancelled; `--no-license-llm` (the third license tier has no model wired up) is currently a no-op.
+> **Status**: `extract` (with `--format` / `-o` / `--offline` / `--revision` / `--show-provenance` / `--strict` / `--download-only` / `--analysis-only` / `--output-dir`), `schema`, `verify`, `batch`, and `coverage` are all implemented (`modelspec/cli.py`). `extract` already wires in the six source types + quantization/merge + cross-validation. `--db` was cancelled; `--no-license-llm` (the third license tier has no model wired up) is currently a no-op.
 
 ## Design goal
 
@@ -56,6 +56,7 @@ modelspec extract meta-llama/Llama-3.1-8B --analysis-only
 
 ```bash
 modelspec schema             # export the JSON Schema (ModelSpec.model_json_schema())
+modelspec verify <file>      # validate a ModelSpec JSON/YAML file against that schema
 modelspec batch repos.txt    # batch extraction + an unknown_fields frequency report (M4, implemented)
 modelspec coverage repos.txt # the coverage sanity-check dashboard (M4, implemented)
 modelspec explain <field>    # explain what a schema field means (M5)
@@ -63,6 +64,17 @@ modelspec completion <shell> # print a bash/zsh/fish tab-completion script (M5)
 ```
 
 The full options and field-promotion workflow for `batch` / `coverage` are in [analytics.md](analytics.md).
+
+### `verify` — validate a ModelSpec document
+
+Checks a JSON or YAML file against the live `ModelSpec.model_json_schema()` using a standard JSON Schema (draft 2020-12) validator — catches type errors, bad enum values, and invalid discriminated unions (e.g. an unrecognized `quantization.format`). Independent of `extract`: it works on any document, including one hand-edited, produced by another tool, or extracted with a different modelspec version than the schema installed here.
+
+```bash
+modelspec verify llama.json
+modelspec verify spec.yaml --format yaml   # format is inferred from the extension when omitted
+```
+
+Prints `valid: <file> conforms to the ModelSpec schema` and exits 0 on success; on failure, exits 1 and lists every violation with its location, e.g. `identity/source_format: 'bogus' is not one of ['hf', 'gguf', 'adapter', 'raw', 'unknown']`. Exits 2 for I/O/parse errors or a missing `jsonschema` install (`pip install 'modelspec[verify]'`).
 
 ### `explain` — field documentation (M5)
 
@@ -101,6 +113,14 @@ subcommand's options.
 | 0 | success |
 | 1 | extraction / validation failed (or `--strict` hit a warning) |
 | 2 | repo not found or network error |
+
+`verify`:
+
+| Code | Meaning |
+| --- | --- |
+| 0 | the document conforms to the schema |
+| 1 | the document violates the schema (details printed to stderr) |
+| 2 | can't read/parse the file, or `jsonschema` isn't installed |
 
 `batch` / `coverage`:
 

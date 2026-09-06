@@ -74,8 +74,8 @@ Requires Python ≥ 3.10.
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
-pip install -e ".[dev]"        # package + pytest + PyYAML + gguf
-# optional: pip install -e ".[all]"   # runtime extras: gguf / yaml
+pip install -e ".[dev]"        # package + pytest + PyYAML + gguf + jsonschema
+# optional: pip install -e ".[all]"   # runtime extras: gguf / yaml / verify
 ```
 
 Set `HF_TOKEN` (exported!) for authenticated, higher-rate Hub access:
@@ -95,8 +95,9 @@ modelspec extract ./model --offline --show-provenance   # per-field sources + ra
 modelspec extract meta-llama/Llama-3.1-8B-Instruct --download-only
 modelspec extract meta-llama/Llama-3.1-8B-Instruct --analysis-only
 
-# Export the JSON Schema, or explain a field
+# Export the JSON Schema, validate a file against it, or explain a field
 modelspec schema
+modelspec verify spec.json          # validates against ModelSpec.model_json_schema()
 modelspec explain head_dim          # type, choices, description (from the schema)
 modelspec completion bash           # shell tab-completion script
 
@@ -167,7 +168,7 @@ decoder_llm_quants = list(filter_specs(specs, all_of(
 ## Run the tests
 
 ```bash
-pytest -q     # 123 tests; no network, no Pydantic mocking
+pytest -q     # 128 tests; no network, no Pydantic mocking
 ```
 
 Extractors are fed fixture files (`tests/conftest.py` writes header-only

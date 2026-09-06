@@ -49,7 +49,7 @@ docs/                       # design docs
 ## Tech stack
 
 - Python, Pydantic v2 (**there is no v3**; use `model_dump` / `model_validate` / `@field_validator` / `model_config = ConfigDict(...)`).
-- Dependencies: `pydantic>=2`, `huggingface_hub`, `requests`; `gguf>=0.10` is an optional dependency (conditional import).
+- Dependencies: `pydantic>=2`, `huggingface_hub`, `requests`; `gguf>=0.10`, `PyYAML>=6`, and `jsonschema>=4` (for `modelspec verify`) are optional dependencies (conditional import).
 - Packaging: a single package with multiple sub-modules (option B). **Do not split the schema into its own package** (an anti-pattern).
 
 ## Steps to add an extractor
@@ -69,6 +69,7 @@ docs/                       # design docs
 - **M5 done**: consumer-facing help. CLI: richer `--help` / usage examples, `modelspec explain <field>` (fuzzy field docs introspected from the schema's `description=`), `modelspec completion bash|zsh|fish`. Library API: `ModelSpec` convenience accessors (`is_quantized()` / `effective_context` / `source_of()` …) wrapping the orthogonal structures + provenance, plus `modelspec.query` (composable predicates + `filter_specs`) and `modelspec.explain` (`field_catalog` / `explain_field`). See [docs/helpers.md](docs/helpers.md). 87 unit tests, all green.
 - All roadmap milestones are complete. Follow-up increments: BnB/FP8/MLX quantization branches, adapter extraction, README YAML codeblock parsing. `gguf` / `PyYAML` are optional deps (included in the `dev` extras); without PyYAML, merge is still detected but the `mergekit_config.yml` recipe is not parsed.
 - **CLI: `extract --download-only` / `--analysis-only`**: splits the one-shot `extract` into a fetch-only step (writes metadata to `--output-dir`, default `./<repo_id>`, plus a `MODELSPEC_MANIFEST.md` describing what was pulled and how) and an offline-only analysis step over that directory. `identity.repo_id` is recovered from the manifest when present. The manifest also records the resolved commit SHA for `revision` (which can move) and per-file `oid`/`sha256` hashes, so a header-only download is verifiable against the exact published file without downloading the rest of it. See [docs/cli.md](docs/cli.md).
+- **CLI: `verify <file>`**: validates a plain JSON/YAML ModelSpec document against `ModelSpec.model_json_schema()` with `jsonschema` (the `verify` extra) — independent of `extract`, so it also catches a hand-edited or third-party document. See [docs/cli.md](docs/cli.md).
 
 ## Environment & testing conventions
 
