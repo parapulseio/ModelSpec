@@ -9,8 +9,13 @@ Public entry points:
       ``explain_field``).
 """
 
+from importlib.metadata import PackageNotFoundError, version
+
 from modelspec.schema import ModelSpec
 
-__version__ = "0.1.0"
+try:
+    __version__ = version("modelspec")
+except PackageNotFoundError:  # pragma: no cover - running from source, not installed
+    __version__ = "0.0.0+unknown"
 
 __all__ = ["ModelSpec", "__version__"]

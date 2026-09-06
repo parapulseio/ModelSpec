@@ -88,6 +88,29 @@ for each `can_handle` extractor, call `extract` and collect `FieldClaim`s (the G
 - The third LLM tier of license identification is currently a hook (no model wired up); the `--no-license-llm` option is reserved.
 - The `io` sub-package name collides with the stdlib `io` but doesn't conflict (absolute import `modelspec.io`).
 
+## Versioning & releases
+
+The version number is **not** hardcoded anywhere in the source — `[tool.hatch.version] source = "vcs"` in `pyproject.toml` derives it entirely from git tags via `hatch-vcs`, and `modelspec.__version__` reads it back from the installed package's metadata (`importlib.metadata.version("modelspec")`). This is the single source of truth other projects should pin against.
+
+- **On a tagged commit** (`v0.2.0`), the installed version is exactly `0.2.0`.
+- **Between tags**, it's a PEP 440 dev version like `0.2.1.dev3+g1a2b3c4` (3 commits past `v0.2.0`, at commit `1a2b3c4`) — this is expected and not a bug; it just means "not a release."
+- A fresh `pip install -e .` (or any rebuild) is required to pick up a newly-created tag, since the version is resolved at build/install time, not read live from git on every import.
+
+**Cutting a release** (maintainers): tag `main` and push the tag — `.github/workflows/release.yml` runs the test suite, refuses to release if the resolved version is a dirty/dev string (i.e. the tag doesn't point at a clean, exact commit), builds the sdist + wheel, exports the JSON Schema (`modelspec schema > modelspec.schema.json`), and publishes a GitHub Release with all three attached plus auto-generated notes. The standalone schema file lets third parties validate `ModelSpec` documents against a specific released version (e.g. with `modelspec verify`, or any generic JSON Schema tool) without installing the Python package at all.
+
+```bash
+git tag v0.2.0
+git push origin v0.2.0
+```
+
+**Consuming a pinned version** (other projects, since this package is not published to PyPI):
+
+```bash
+pip install "git+https://github.com/parapulseio/ModelSpec.git@v0.2.0"
+# or in a requirements.txt / pyproject.toml dependency:
+#   modelspec @ git+https://github.com/parapulseio/ModelSpec.git@v0.2.0
+```
+
 ## Adding an extractor (conventions recap)
 
 1. Create a new file under `modelspec/extractors/` implementing the `Extractor` protocol (`name` / `can_handle` / `extract`).

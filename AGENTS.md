@@ -51,6 +51,7 @@ docs/                       # design docs
 - Python, Pydantic v2 (**there is no v3**; use `model_dump` / `model_validate` / `@field_validator` / `model_config = ConfigDict(...)`).
 - Dependencies: `pydantic>=2`, `huggingface_hub`, `requests`; `gguf>=0.10`, `PyYAML>=6`, and `jsonschema>=4` (for `modelspec verify`) are optional dependencies (conditional import).
 - Packaging: a single package with multiple sub-modules (option B). **Do not split the schema into its own package** (an anti-pattern).
+- **Versioning is git-tag-derived, never hardcoded** — `pyproject.toml` has no `version` field (`dynamic = ["version"]`, `[tool.hatch.version] source = "vcs"` via `hatch-vcs`); `modelspec.__version__` reads it back via `importlib.metadata.version("modelspec")`. Do not reintroduce a static version string anywhere. Releases are `vX.Y.Z` git tags (not published to PyPI); pushing one triggers `.github/workflows/release.yml`. See [docs/development.md](docs/development.md#versioning--releases).
 
 ## Steps to add an extractor
 

@@ -81,6 +81,14 @@ pip install -e ".[dev]"        # package + pytest + PyYAML + gguf + jsonschema
 Set `HF_TOKEN` (exported!) for authenticated, higher-rate Hub access:
 `export HF_TOKEN=hf_...`.
 
+**Pinning a version from another project** (releases are git tags, not published to PyPI — see [docs/development.md](docs/development.md#versioning--releases)):
+
+```bash
+pip install "git+https://github.com/parapulseio/ModelSpec.git@v0.1.0"
+```
+
+Each [GitHub Release](https://github.com/parapulseio/ModelSpec/releases) also attaches a standalone `modelspec.schema.json` — useful for validating `ModelSpec` documents (e.g. via `modelspec verify` or any generic JSON Schema tool) against that exact version without installing the Python package.
+
 ## Usage
 
 ```bash
