@@ -190,3 +190,23 @@ def test_unknown_fields_reported(tmp_path: Path):
     _, result = _claims(tmp_path, cfg)
     assert "enable_my_custom_thing" in result.unknown_fields
     assert result.raw["enable_my_custom_thing"] is True
+
+
+def test_list_valued_head_counts_are_not_claimed(tmp_path: Path):
+    # Layer-wise / non-uniform architectures (e.g. per-layer head scaling, as in
+    # OpenELM) declare these as a list of per-layer values rather than a single
+    # int. A list must not be claimed into the scalar attention.num_heads /
+    # attention.num_kv_heads schema fields (regression: previously raised a
+    # pydantic ValidationError downstream).
+    cfg = {
+        "architectures": ["SomeLayerWiseForCausalLM"],
+        "num_attention_heads": [1, 2, 5, 8],
+        "num_key_value_heads": [1, 2, 5, 8],
+        "hidden_size": 4096,
+    }
+    claims, result = _claims(tmp_path, cfg)
+    assert "attention.num_heads" not in claims
+    assert "attention.num_kv_heads" not in claims
+    assert "attention.type" not in claims  # can't infer mha/gqa/mqa without a scalar
+    assert "architecture.head_dim" not in claims  # can't derive hidden_size // heads
+    assert result.raw["num_attention_heads"] == [1, 2, 5, 8]  # preserved losslessly

@@ -234,11 +234,22 @@ class ConfigJsonExtractor:
                 continue  # GQA kv-head count is not the operative quantity under MLA
             for name in candidates:
                 if name in eff:
+                    value = eff[name]
+                    # Layer-wise / non-uniform architectures (e.g. OpenELM-style
+                    # per-layer head scaling) declare these as a list rather than
+                    # a scalar. The schema field is a single int, so a list can't
+                    # be claimed here — try the next alias name; the raw value is
+                    # still preserved via ExtractorResult.raw.
+                    if canonical_path in (
+                        "attention.num_heads",
+                        "attention.num_kv_heads",
+                    ) and not isinstance(value, int):
+                        continue
                     # config's vocab_size is the (often padded) embedding size; the
                     # tokenizer's own count is more authoritative, so emit at medium
                     # and let the tokenizer extractor win when both are present.
                     conf = "medium" if canonical_path == "tokenizer.vocab_size" else "high"
-                    claims.append(FieldClaim(canonical_path, eff[name], "config", conf))
+                    claims.append(FieldClaim(canonical_path, value, "config", conf))
                     break
 
         family = _infer_family(raw)
@@ -258,6 +269,12 @@ class ConfigJsonExtractor:
 
         n_heads = eff.get("num_attention_heads")
         n_kv = eff.get("num_key_value_heads")
+        # Layer-wise architectures can declare these as a list; the inference
+        # below assumes a single scalar per model, so treat non-int as absent.
+        if not isinstance(n_heads, int):
+            n_heads = None
+        if not isinstance(n_kv, int):
+            n_kv = None
         if is_mla:
             claims.append(FieldClaim("attention.type", "mla", "inferred", "high"))
             tags.append("mla")
