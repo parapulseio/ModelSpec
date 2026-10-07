@@ -290,6 +290,13 @@ class Provenance(_Model):
     raw_gguf_kv: Optional[dict[str, Any]] = Field(
         default=None, description="The full GGUF KV dump (large arrays folded to length markers)."
     )
+    passthrough: dict[str, Any] = Field(
+        default_factory=dict,
+        description=(
+            "Recognized-but-not-canonical values kept verbatim, e.g. quantization.* claims "
+            "dropped because no quantization.format was known."
+        ),
+    )
     unknown_fields: list[str] = Field(
         default_factory=list,
         description="Raw keys covered by neither canonical nor passthrough (drives field promotion).",

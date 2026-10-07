@@ -39,7 +39,7 @@ ModelSpec
   ├── quantization        : Quant | None    (optional)  discriminated union (see below)
   ├── merge               : MergeSpec | None (optional) detection / method / components
   ├── adapter             : Adapter | None   (optional) peft_type / base_model / rank
-  └── provenance          : Provenance      (required)  per_field / conflicts / raw_* / unknown_fields
+  └── provenance          : Provenance      (required)  per_field / conflicts / raw_* / passthrough / unknown_fields
 ```
 
 `quantization`, `merge`, and `adapter` are all `Optional`, mutually non-exclusive, and never reference each other. Downstream filtering for "all AWQ-quantized merged models" is just a predicate: `spec.quantization.format == "awq" and spec.merge is not None`.
@@ -104,6 +104,7 @@ ModelSpec
 - `not_applicable: list[str]` — dotted paths the model **legitimately lacks** (e.g. `attention.num_kv_heads` under MLA), distinct from merely missing/`None`. Extractors that know a field doesn't apply emit it (see `ExtractorResult.not_applicable`).
 - `raw_config_json: dict | None` — the full original config, hash-archived, never lost
 - `raw_gguf_kv: dict | None`
+- `passthrough: dict` — recognized-but-not-canonical values kept verbatim; e.g. `quantization.*` claims dropped for lack of `quantization.format` land under `passthrough["quantization"]` (with a warning)
 - `unknown_fields: list[str]` — fields present in raw but covered by neither canonical nor passthrough (the auto feedback loop)
 
 > **Self-documenting schema**: every field carries a Pydantic `Field(description=...)`, so `model_json_schema()` export includes descriptions (UI tooltips, generated forms). `modelspec.schema.export_json_schema()` (what `modelspec schema` / `modelspec verify` actually use) wraps this with `$schema` / `$id` / `$comment` so a schema file handed to a third party is self-identifying — see [cli.md](cli.md#schema--export-the-json-schema).

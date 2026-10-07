@@ -168,6 +168,55 @@ def test_local_gguf_model_end_to_end(tmp_path: Path):
     assert spec.provenance.raw_gguf_kv is not None
 
 
+def test_quantization_claims_without_format_are_dropped(tmp_path: Path):
+    from modelspec.extractors.base import FieldClaim
+    from modelspec.pipeline.merger import merge_claims
+    from modelspec.pipeline.orchestrator import reshape
+    from modelspec.schema import ModelSpec
+
+    merged = merge_claims(
+        [
+            FieldClaim("quantization.bits_per_weight_avg", 5.7, "tensors", "high"),
+            FieldClaim("architecture.num_layers", 2, "config", "high"),
+        ]
+    )
+    tree = reshape(
+        merged,
+        repo_id="x",
+        source_format="hf",
+        raw_config=None,
+        raw_gguf=None,
+        unknown_fields=[],
+        not_applicable=[],
+    )
+    assert "quantization" not in tree
+    assert "quantization.bits_per_weight_avg" not in tree["provenance"]["per_field"]
+    spec = ModelSpec.model_validate(tree)
+    assert spec.quantization is None
+    assert spec.architecture.num_layers == 2
+    assert any("5.7" in w for w in spec.provenance.warnings)
+    assert spec.provenance.passthrough == {"quantization": {"bits_per_weight_avg": 5.7}}
+
+
+def test_quantization_with_format_is_kept():
+    from modelspec.extractors.base import FieldClaim
+    from modelspec.pipeline.merger import merge_claims
+    from modelspec.pipeline.orchestrator import reshape
+
+    merged = merge_claims(
+        [
+            FieldClaim("quantization.format", "awq", "config", "high"),
+            FieldClaim("quantization.bits", 4, "config", "high"),
+        ]
+    )
+    tree = reshape(
+        merged, repo_id=None, source_format="hf", raw_config=None, raw_gguf=None,
+        unknown_fields=[], not_applicable=[],
+    )
+    assert tree["quantization"] == {"format": "awq", "bits": 4}
+    assert tree["provenance"]["warnings"] == []
+
+
 def test_packed_awq_param_count_passes_double_path_check(tmp_path: Path):
     # hidden=16, 1 layer, vocab=32, intermediate=32, MHA, tied embeddings.
     write_config(

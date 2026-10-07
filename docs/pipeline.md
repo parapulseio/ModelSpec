@@ -59,6 +59,10 @@ Reorganize the flat dict into the nested structure `ModelSpec` expects (a plain 
 
 Runs multi-source checks before/after validation, writing results to `provenance.warnings`:
 
+### Quantization guard (reshape)
+
+`quantization` is a discriminated union on `format`. If the merged claims contain `quantization.*` paths but no `quantization.format`, `reshape` does not build the subtree (so `spec.quantization` is `None` and validation succeeds) and stores the dropped values in `provenance.passthrough["quantization"]` and adds a `provenance.warnings` entry.
+
 ### Parameter double-path check
 
 - **Path A (authoritative)**: summed safetensors / GGUF tensor element counts.
