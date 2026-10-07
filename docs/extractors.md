@@ -98,6 +98,7 @@ with open(path, "rb") as f:
 Outputs:
 
 - `parameters.total` — summed over all tensor shapes (authoritative). **Packed AWQ/GPTQ**: `qweight` is int32-packed (`32/bits` weights per element), so a prefix with `qweight` + `scales` counts its unpacked `in × out`, and `qzeros`/`scales`/`g_idx` are excluded. Derived from shapes alone (no config.json), with `scales` = `[groups, out]`: AWQ `qweight` is `[in, out/pack]` (`in` = rows); GPTQ is `[in/pack, out]` (`in` = `len(g_idx)`, else `rows × out/qzeros.cols`). `qzeros` is optional for AWQ and for GPTQ with `g_idx`. A prefix that still isn't derivable is counted raw and `parameters.total` drops to `medium` confidence.
+- `quantization.bits_per_weight_avg` (packed AWQ/GPTQ only) — measured whole-model bpw: Σ stored bits of every tensor (dtype bits × elements, **including** `qzeros`/`scales`/`g_idx` and unquantized FP16 embeddings / `lm_head`) ÷ `parameters.total`, so a nominal 4-bit AWQ comes out ~5+ bpw and is comparable to GGUF Q4_K_M (~4.83). Emitted only when every `qweight` prefix is derivable and every dtype is known; the `config_json` extractor supplies `quantization.format` (the pipeline drops the claim if no format is present).
 - `parameters.dtype_native` — for packed layers, the `scales` dtype (the dequantized dtype), not `I32`
 - `architecture.tied_embeddings` — whether `lm_head.weight` exists
 - the tensor name list — the last-resort fallback for architecture inference

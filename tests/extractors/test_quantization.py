@@ -86,6 +86,12 @@ def test_avg_bits_per_weight_block_quant():
     assert bpw == 4.5
 
 
+def test_avg_bits_per_weight_unknown_type_returns_none():
+    from gguf.constants import GGMLQuantizationType
+
+    assert _avg_bits_per_weight({GGMLQuantizationType.Q4_K: 256, 9999: 256}, 512) is None
+
+
 def test_gguf_quantization_end_to_end(tmp_path: Path):
     write_gguf(
         tmp_path / "model-Q4_K_M.gguf",

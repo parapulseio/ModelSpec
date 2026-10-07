@@ -48,12 +48,14 @@ class AWQQuant(BaseModel):
     bits: int
     group_size: int
     zero_point: bool
+    bits_per_weight_avg: float | None   # measured whole-model bpw, from safetensors headers
 
 class GPTQQuant(BaseModel):
     format: Literal["gptq"]
     bits: int
     group_size: int
     desc_act: bool
+    bits_per_weight_avg: float | None   # measured whole-model bpw, from safetensors headers
 
 class BnBQuant(BaseModel):
     format: Literal["bitsandbytes"]
