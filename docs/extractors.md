@@ -97,8 +97,8 @@ with open(path, "rb") as f:
 
 Outputs:
 
-- `parameters.total` — summed over all tensor shapes (authoritative)
-- `parameters.dtype_native`
+- `parameters.total` — summed over all tensor shapes (authoritative). **Packed AWQ/GPTQ**: `qweight` is int32-packed (`32/bits` weights per element), so a prefix with `qweight` + `scales` counts its unpacked `in × out`, and `qzeros`/`scales`/`g_idx` are excluded. Derived from shapes alone (no config.json), with `scales` = `[groups, out]`: AWQ `qweight` is `[in, out/pack]` (`in` = rows); GPTQ is `[in/pack, out]` (`in` = `len(g_idx)`, else `rows × out/qzeros.cols`). `qzeros` is optional for AWQ and for GPTQ with `g_idx`. A prefix that still isn't derivable is counted raw and `parameters.total` drops to `medium` confidence.
+- `parameters.dtype_native` — for packed layers, the `scales` dtype (the dequantized dtype), not `I32`
 - `architecture.tied_embeddings` — whether `lm_head.weight` exists
 - the tensor name list — the last-resort fallback for architecture inference
 - the whole `__metadata__` dict into passthrough (may contain SAI ModelSpec fields, training hyperparams)

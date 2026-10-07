@@ -83,3 +83,112 @@ def test_moe_tensor_pattern(tmp_path: Path):
     _, result = _claims(src)
     tag_claims = [c.value for c in result.claims if c.field_path == "architecture.tags"]
     assert ["moe"] in tag_claims
+
+
+def _packed_claims(tmp_path: Path, tensors: dict) -> dict:
+    write_safetensors_header(tmp_path / "model.safetensors", tensors)
+    src = ExtractionSource(root=tmp_path, repo_files=["model.safetensors"])
+    return _claims(src)[0]
+
+
+def test_awq_packed_param_count(tmp_path: Path):
+    # in=256, out=128, 4-bit (pack=8), group=128 -> AWQ GEMM layout
+    claims = _packed_claims(
+        tmp_path,
+        {
+            "l.qweight": {"dtype": "I32", "shape": [256, 16]},
+            "l.qzeros": {"dtype": "I32", "shape": [2, 16]},
+            "l.scales": {"dtype": "F16", "shape": [2, 128]},
+            "norm.weight": {"dtype": "F16", "shape": [256]},
+        },
+    )
+    assert claims["parameters.total"] == 256 * 128 + 256
+    assert claims["parameters.dtype_native"] == "F16"
+
+
+def test_gptq_packed_param_count_with_and_without_g_idx(tmp_path: Path):
+    base = {
+        "l.qweight": {"dtype": "I32", "shape": [32, 128]},  # in/pack=32 -> in=256
+        "l.qzeros": {"dtype": "I32", "shape": [2, 16]},
+        "l.scales": {"dtype": "F16", "shape": [2, 128]},
+    }
+    assert _packed_claims(tmp_path, base)["parameters.total"] == 256 * 128
+    with_g = {**base, "l.g_idx": {"dtype": "I32", "shape": [256]}}
+    assert _packed_claims(tmp_path, with_g)["parameters.total"] == 256 * 128
+
+
+def test_awq_without_qzeros(tmp_path: Path):
+    claims = _packed_claims(
+        tmp_path,
+        {
+            "l.qweight": {"dtype": "I32", "shape": [256, 16]},
+            "l.scales": {"dtype": "F16", "shape": [2, 128]},
+        },
+    )
+    assert claims["parameters.total"] == 256 * 128
+    assert claims["parameters.dtype_native"] == "F16"
+
+
+def test_gptq_g_idx_without_qzeros(tmp_path: Path):
+    claims = _packed_claims(
+        tmp_path,
+        {
+            "l.qweight": {"dtype": "I32", "shape": [32, 128]},
+            "l.scales": {"dtype": "F16", "shape": [2, 128]},
+            "l.g_idx": {"dtype": "I32", "shape": [256]},
+        },
+    )
+    assert claims["parameters.total"] == 256 * 128
+
+
+def test_underivable_gptq_lowers_confidence(tmp_path: Path):
+    write_safetensors_header(
+        tmp_path / "model.safetensors",
+        {
+            "l.qweight": {"dtype": "I32", "shape": [32, 128]},
+            "l.scales": {"dtype": "F16", "shape": [2, 128]},
+        },
+    )
+    src = ExtractionSource(root=tmp_path, repo_files=["model.safetensors"])
+    result = SafetensorsExtractor().extract(src)
+    total = next(c for c in result.claims if c.field_path == "parameters.total")
+    assert total.confidence == "medium"
+
+
+def test_packed_tensors_aggregate_across_shards(tmp_path: Path):
+    write_safetensors_header(
+        tmp_path / "model-00001-of-00002.safetensors",
+        {
+            "a.qweight": {"dtype": "I32", "shape": [256, 16]},
+            "a.qzeros": {"dtype": "I32", "shape": [2, 16]},
+            "a.scales": {"dtype": "F16", "shape": [2, 128]},
+        },
+    )
+    write_safetensors_header(
+        tmp_path / "model-00002-of-00002.safetensors",
+        {
+            "b.qweight": {"dtype": "I32", "shape": [32, 128]},
+            "b.qzeros": {"dtype": "I32", "shape": [2, 16]},
+            "b.scales": {"dtype": "F16", "shape": [2, 128]},
+            "b.g_idx": {"dtype": "I32", "shape": [256]},
+        },
+    )
+    (tmp_path / "model.safetensors.index.json").write_text(
+        json.dumps(
+            {
+                "weight_map": {
+                    "a.qweight": "model-00001-of-00002.safetensors",
+                    "b.qweight": "model-00002-of-00002.safetensors",
+                }
+            }
+        )
+    )
+    src = ExtractionSource(
+        root=tmp_path,
+        repo_files=[
+            "model.safetensors.index.json",
+            "model-00001-of-00002.safetensors",
+            "model-00002-of-00002.safetensors",
+        ],
+    )
+    assert _claims(src)[0]["parameters.total"] == 2 * 256 * 128
