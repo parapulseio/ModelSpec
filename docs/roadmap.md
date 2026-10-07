@@ -50,7 +50,7 @@ Each round is an independent, valuable increment:
 
 ### M3 — quantization + merge ✅ done
 - ✅ quantization discriminated union (`Field(discriminator="format")`): GGUF / AWQ / GPTQ
-  - the GGUF branch emitted by the gguf extractor: `file_type` name, **measured bits-per-weight** (look up `GGML_QUANT_SIZES`, not the nominal value), `tensor_types` mixed-precision distribution, `has_imatrix` filename heuristic
+  - the GGUF branch emitted by the gguf extractor: `file_type` name, **measured bits-per-weight** (look up `GGML_QUANT_SIZES`, not the nominal value), `tensor_types` mixed-precision distribution, `has_imatrix` (`quantize.imatrix.*` KV, filename heuristic fallback)
   - the AWQ / GPTQ branches emitted by the config_json extractor from `quantization_config`; an unknown `quant_method` emits no claim (the field stays `null`, so the discriminated union never meets an unknown discriminator)
 - ✅ merge extractor (new source): five detection signals (`config_file` > `card_relation` > `base_model_array` > `hf_tag` > `readme_yaml`); parses the `mergekit_config.yml` recipe (method alias normalization + component weight/density); lightweight README front-matter parsing; the base_model chain written to `identity.lineage`
 - ✅ `cross_validate` gains a merge-architecture consistency check

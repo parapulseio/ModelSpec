@@ -34,6 +34,52 @@ def read_header(path: Path) -> dict:
         return json.loads(f.read(n))
 
 
+_PACKED_AUX = ("qzeros", "scales", "g_idx")
+
+
+def _packed_linear_shapes(tensors: dict[str, dict]) -> tuple[dict[str, tuple[int, str]], bool]:
+    """Map each AWQ/GPTQ ``<prefix>.`` to (unpacked weight count, dequantized dtype).
+
+    ``qweight`` is int32-packed (``pack = 32 / bits`` weights per element), so
+    its raw element count under-reports the weights. Derived from shapes alone
+    (no dependency on config.json), ``scales`` being ``[groups, out]``:
+
+    - AWQ ``qweight`` is ``[in, out/pack]`` (``qweight.cols < out``): ``in = rows``.
+    - GPTQ ``qweight`` is ``[in/pack, out]`` (``qweight.cols == out``): ``in`` is
+      ``len(g_idx)`` when present, else ``rows * pack`` with ``pack = out /
+      qzeros.cols``.
+
+    ``qzeros`` is therefore optional. Returns the resolved prefixes plus whether
+    every ``qweight`` prefix was resolved; unresolved ones are counted raw by
+    the caller (an under-count, so the caller lowers confidence).
+    """
+    result: dict[str, tuple[int, str]] = {}
+    all_resolved = True
+    for name, info in tensors.items():
+        if not name.endswith(".qweight"):
+            continue
+        prefix = name[: -len("qweight")]
+        qw = info.get("shape", [])
+        sc = tensors.get(prefix + "scales")
+        in_features = None
+        if len(qw) == 2 and sc and len(sc.get("shape", [])) == 2:
+            out = sc["shape"][1]
+            if 0 < qw[1] < out and out % qw[1] == 0:  # AWQ
+                in_features = qw[0]
+            elif qw[1] == out:  # GPTQ
+                g_idx = tensors.get(prefix + "g_idx")
+                qz = tensors.get(prefix + "qzeros")
+                if g_idx and g_idx.get("shape"):
+                    in_features = g_idx["shape"][0]
+                elif qz and len(qz.get("shape", [])) == 2 and qz["shape"][1]:
+                    in_features = qw[0] * (out // qz["shape"][1])
+        if in_features is None:
+            all_resolved = False
+            continue
+        result[prefix] = (in_features * out, sc.get("dtype", "unknown"))
+    return result, all_resolved
+
+
 def _shard_files(source: ExtractionSource) -> tuple[list[str], bool]:
     """Return the list of safetensors files to read and whether it is sharded."""
     if source.has(_INDEX):
@@ -74,14 +120,25 @@ class SafetensorsExtractor:
         # --- authoritative parameter count: sum of element counts ---
         total = 0
         dtype_counts: dict[str, int] = {}
-        for info in tensors.values():
-            shape = info.get("shape", [])
-            n = prod(shape) if shape else 0
+        # AWQ/GPTQ: count unpacked weights; qzeros/scales/g_idx are not parameters.
+        packed, packed_ok = _packed_linear_shapes(tensors)
+        for name, info in tensors.items():
+            prefix, _, leaf = name.rpartition(".")
+            prefix += "."
+            if prefix in packed and leaf in _PACKED_AUX:
+                continue
+            if prefix in packed and leaf == "qweight":
+                n, dt = packed[prefix]
+            else:
+                shape = info.get("shape", [])
+                n = prod(shape) if shape else 0
+                dt = info.get("dtype", "unknown")
             total += n
-            dt = info.get("dtype", "unknown")
             dtype_counts[dt] = dtype_counts.get(dt, 0) + n
         if tensors:
-            claims.append(FieldClaim("parameters.total", total, "tensors", "high"))
+            claims.append(
+                FieldClaim("parameters.total", total, "tensors", "high" if packed_ok else "medium")
+            )
             # Native dtype = the dtype covering the most parameters.
             dominant = max(dtype_counts.items(), key=lambda kv: kv[1])[0]
             claims.append(FieldClaim("parameters.dtype_native", dominant, "tensors", "high"))

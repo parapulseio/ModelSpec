@@ -215,3 +215,45 @@ def test_quantization_with_format_is_kept():
     )
     assert tree["quantization"] == {"format": "awq", "bits": 4}
     assert tree["provenance"]["warnings"] == []
+
+
+def test_packed_awq_param_count_passes_double_path_check(tmp_path: Path):
+    # hidden=16, 1 layer, vocab=32, intermediate=32, MHA, tied embeddings.
+    write_config(
+        tmp_path / "config.json",
+        {
+            "architectures": ["LlamaForCausalLM"],
+            "num_hidden_layers": 1,
+            "hidden_size": 16,
+            "num_attention_heads": 2,
+            "num_key_value_heads": 2,
+            "intermediate_size": 32,
+            "vocab_size": 32,
+            "quantization_config": {"quant_method": "awq", "bits": 4, "group_size": 16},
+        },
+    )
+
+    def awq(i: int, o: int) -> dict:
+        return {
+            "qweight": {"dtype": "I32", "shape": [i, o // 8]},
+            "qzeros": {"dtype": "I32", "shape": [i // 16, o // 8]},
+            "scales": {"dtype": "F16", "shape": [i // 16, o]},
+        }
+
+    tensors = {"model.embed_tokens.weight": {"dtype": "F16", "shape": [32, 16]}}
+    for proj, (i, o) in {
+        "self_attn.q_proj": (16, 16),
+        "self_attn.k_proj": (16, 16),
+        "self_attn.v_proj": (16, 16),
+        "self_attn.o_proj": (16, 16),
+        "mlp.gate_proj": (16, 32),
+        "mlp.up_proj": (16, 32),
+        "mlp.down_proj": (32, 16),
+    }.items():
+        for leaf, info in awq(i, o).items():
+            tensors[f"model.layers.0.{proj}.{leaf}"] = info
+    write_safetensors_header(tmp_path / "model.safetensors", tensors)
+
+    spec = extract(str(tmp_path), offline=True)
+    assert spec.parameters.total == 32 * 16 + 4 * 256 + 3 * 512
+    assert not any("parameter count mismatch" in w for w in spec.provenance.warnings)
