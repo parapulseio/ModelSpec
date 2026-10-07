@@ -197,6 +197,9 @@ class AWQQuant(_Model):
     bits: Optional[int] = Field(default=None, description="Weight bit width.")
     group_size: Optional[int] = Field(default=None, description="Quantization group size.")
     zero_point: Optional[bool] = Field(default=None, description="Whether zero-point quantization is used.")
+    bits_per_weight_avg: Optional[float] = Field(
+        default=None, description="Measured average bits-per-weight (not the nominal value)."
+    )
 
 
 class GPTQQuant(_Model):
@@ -204,6 +207,9 @@ class GPTQQuant(_Model):
     bits: Optional[int] = Field(default=None, description="Weight bit width.")
     group_size: Optional[int] = Field(default=None, description="Quantization group size.")
     desc_act: Optional[bool] = Field(default=None, description="Whether activation-order (desc_act) is used.")
+    bits_per_weight_avg: Optional[float] = Field(
+        default=None, description="Measured average bits-per-weight (not the nominal value)."
+    )
 
 
 Quantization = Annotated[
@@ -399,13 +405,18 @@ class ModelSpec(_Model):
 
     @property
     def bits_per_weight(self) -> Optional[float]:
-        """Average bits-per-weight, regardless of quant format. None if not quantized."""
+        """Average bits-per-weight, regardless of quant format. None if not quantized.
+
+        Prefers the measured whole-model value; AWQ/GPTQ fall back to nominal ``bits``.
+        """
         q = self.quantization
         if q is None:
             return None
-        if isinstance(q, GGUFQuant):
+        if q.bits_per_weight_avg is not None:  # measured, on every branch
             return q.bits_per_weight_avg
-        bits = getattr(q, "bits", None)  # AWQ / GPTQ carry a nominal bit width
+        if isinstance(q, GGUFQuant):
+            return None
+        bits = getattr(q, "bits", None)  # AWQ / GPTQ fall back to the nominal bit width
         return float(bits) if bits is not None else None
 
     @property

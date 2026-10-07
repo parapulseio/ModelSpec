@@ -98,6 +98,7 @@ with open(path, "rb") as f:
 Outputs:
 
 - `parameters.total` — summed over all tensor shapes (authoritative). **Packed AWQ/GPTQ**: `qweight` is int32-packed (`32/bits` weights per element), so a prefix with `qweight` + `scales` counts its unpacked `in × out`, and `qzeros`/`scales`/`g_idx` are excluded. Derived from shapes alone (no config.json), with `scales` = `[groups, out]`: AWQ `qweight` is `[in, out/pack]` (`in` = rows); GPTQ is `[in/pack, out]` (`in` = `len(g_idx)`, else `rows × out/qzeros.cols`). `qzeros` is optional for AWQ and for GPTQ with `g_idx`. A prefix that still isn't derivable is counted raw and `parameters.total` drops to `medium` confidence.
+- `quantization.bits_per_weight_avg` (packed AWQ/GPTQ only) — measured whole-model bpw: Σ stored bits of every tensor (dtype bits × elements, **including** `qzeros`/`scales`/`g_idx` and unquantized FP16 embeddings / `lm_head`) ÷ `parameters.total`, so a nominal 4-bit AWQ comes out ~5+ bpw and is comparable to GGUF Q4_K_M (~4.83). Emitted only when every `qweight` prefix is derivable and every dtype is known; the `config_json` extractor supplies `quantization.format` (the pipeline drops the claim if no format is present).
 - `parameters.dtype_native` — for packed layers, the `scales` dtype (the dequantized dtype), not `I32`
 - `architecture.tied_embeddings` — whether `lm_head.weight` exists
 - the tensor name list — the last-resort fallback for architecture inference
@@ -120,6 +121,7 @@ GGUF header layout (little-endian), read in order, stop after tensor infos:
 
 - Parameter count: `sum(prod(dims) for each tensor info)`
 - Bits-per-weight: look up `GGML_QUANT_SIZES` (block_elements, block_bytes) per tensor type — **Q4_K_M is ~4.83 bpw, not 4** — and average over all weights
+- Mixed-precision layout: for quantized files, `passthrough["tensor_type_layout"]` = `{role: {type_name: [layer indices]}}` (role = tensor name with `blk.{i}.` stripped, e.g. `ffn_down.weight`; non-block tensors like `token_embd.weight` get an empty list). Passthrough only — explains why two `Q4_K_M` files differ and why their bpw is above 4.
 - canonical normalizes known `{arch}.*` keys; `general.*` keys go to passthrough; the compact KV dump (arrays folded to `{"_array_len": n}`) goes to raw
 
 > **Multi-part GGUF (`gguf-split`) is detected and aggregated.** Sibling parts are found by the "`<prefix>-NNNNN-of-MMMMM.gguf`" filename convention (distinct quantization variants in the same repo don't match — they lack a shared prefix+total); a `split.count` KV field is the fallback signal when siblings can't be located by name. The "`-00001-of-*`" part is treated as primary (it carries the full architecture metadata on the versions of `gguf-split` that don't duplicate it into every part); tensor infos from every locally-available part are summed for `parameters.total` / `parameters.dtype_native` / quantization stats, and `identity.file_layout` reads `"sharded"`. If a sibling part isn't present locally, the aggregate is partial but the file is still correctly labeled `"sharded"` rather than `"single"`.

@@ -235,3 +235,74 @@ def test_gpt2_style_embeddings_reported_unquantized(tmp_path: Path):
     src = ExtractionSource(root=tmp_path, repo_files=["model.safetensors"])
     qm = SafetensorsExtractor().extract(src).passthrough["quantized_modules"]
     assert qm["unquantized"] == ["transformer.wpe.weight", "transformer.wte.weight"]
+
+
+def test_awq_measured_bpw_whole_model(tmp_path: Path):
+    # in=256, out=128; stored bits: qweight 256*16*32 + qzeros 2*16*32 +
+    # scales 2*128*16 + norm 256*16; logical weights 256*128 + 256.
+    claims = _packed_claims(
+        tmp_path,
+        {
+            "l.qweight": {"dtype": "I32", "shape": [256, 16]},
+            "l.qzeros": {"dtype": "I32", "shape": [2, 16]},
+            "l.scales": {"dtype": "F16", "shape": [2, 128]},
+            "norm.weight": {"dtype": "F16", "shape": [256]},
+        },
+    )
+    bits = 256 * 16 * 32 + 2 * 16 * 32 + 2 * 128 * 16 + 256 * 16
+    assert claims["quantization.bits_per_weight_avg"] == round(bits / (256 * 128 + 256), 3)
+
+
+def test_gptq_measured_bpw_includes_g_idx_and_fp16_head(tmp_path: Path):
+    claims = _packed_claims(
+        tmp_path,
+        {
+            "l.qweight": {"dtype": "I32", "shape": [32, 128]},
+            "l.qzeros": {"dtype": "I32", "shape": [2, 16]},
+            "l.scales": {"dtype": "F16", "shape": [2, 128]},
+            "l.g_idx": {"dtype": "I32", "shape": [256]},
+            "lm_head.weight": {"dtype": "F16", "shape": [100, 256]},
+        },
+    )
+    bits = 32 * 128 * 32 + 2 * 16 * 32 + 2 * 128 * 16 + 256 * 32 + 100 * 256 * 16
+    assert claims["quantization.bits_per_weight_avg"] == round(bits / (256 * 128 + 100 * 256), 3)
+
+
+def test_no_bpw_claim_for_unquantized_or_underivable(tmp_path: Path):
+    plain = _packed_claims(tmp_path, {"w": {"dtype": "F16", "shape": [4, 4]}})
+    assert "quantization.bits_per_weight_avg" not in plain
+    underivable = _packed_claims(
+        tmp_path,
+        {
+            "l.qweight": {"dtype": "I32", "shape": [32, 128]},
+            "l.scales": {"dtype": "F16", "shape": [2, 128]},
+        },
+    )
+    assert "quantization.bits_per_weight_avg" not in underivable
+
+
+def test_no_bpw_claim_when_a_shard_is_missing(tmp_path: Path):
+    import json
+
+    write_safetensors_header(
+        tmp_path / "model-00001-of-00002.safetensors",
+        {
+            "l.qweight": {"dtype": "I32", "shape": [256, 16]},
+            "l.qzeros": {"dtype": "I32", "shape": [2, 16]},
+            "l.scales": {"dtype": "F16", "shape": [2, 128]},
+        },
+    )
+    index = {"weight_map": {"l.qweight": "model-00001-of-00002.safetensors",
+                            "lm_head.weight": "model-00002-of-00002.safetensors"}}
+    (tmp_path / "model.safetensors.index.json").write_text(json.dumps(index))
+    files = ["model.safetensors.index.json", "model-00001-of-00002.safetensors",
+             "model-00002-of-00002.safetensors"]
+    src = ExtractionSource(root=tmp_path, repo_files=files)
+    partial = _claims(src)[0]
+    assert "quantization.bits_per_weight_avg" not in partial
+
+    write_safetensors_header(
+        tmp_path / "model-00002-of-00002.safetensors",
+        {"lm_head.weight": {"dtype": "F16", "shape": [100, 256]}},
+    )
+    assert "quantization.bits_per_weight_avg" in _claims(src)[0]

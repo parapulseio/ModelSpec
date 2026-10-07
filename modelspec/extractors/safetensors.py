@@ -36,6 +36,14 @@ def read_header(path: Path) -> dict:
 
 _PACKED_AUX = ("qzeros", "scales", "g_idx")
 
+# Stored bits per element for each safetensors dtype.
+_DTYPE_BITS = {
+    "F64": 64, "I64": 64, "U64": 64,
+    "F32": 32, "I32": 32, "U32": 32,
+    "F16": 16, "BF16": 16, "I16": 16, "U16": 16,
+    "I8": 8, "U8": 8, "BOOL": 8, "F8_E4M3": 8, "F8_E5M2": 8,
+}  # fmt: skip
+
 
 def _packed_linear_shapes(tensors: dict[str, dict]) -> tuple[dict[str, tuple[int, str]], bool]:
     """Map each AWQ/GPTQ ``<prefix>.`` to (unpacked weight count, dequantized dtype).
@@ -106,18 +114,22 @@ def _quantized_modules(tensors: dict[str, dict]) -> dict[str, list[str]]:
     return {"quantized": quantized, "unquantized": unquantized}
 
 
-def _shard_files(source: ExtractionSource) -> tuple[list[str], bool]:
-    """Return the list of safetensors files to read and whether it is sharded."""
+def _shard_files(source: ExtractionSource) -> tuple[list[str], bool, bool]:
+    """Return the safetensors files to read, whether it is sharded, and whether
+    every shard the index lists is present locally (False => totals are partial)."""
+    complete = True
     if source.has(_INDEX):
         index = json.loads(source.path(_INDEX).read_text(encoding="utf-8"))
         weight_map = index.get("weight_map", {})
+        wanted = set(weight_map.values())
         # Preserve only shards we actually have locally (header-only is fine).
-        shards = sorted({fn for fn in weight_map.values() if source.has(fn)})
+        shards = sorted(fn for fn in wanted if source.has(fn))
+        complete = len(shards) == len(wanted)
         if shards:
-            return shards, True
+            return shards, True, complete
     singles = sorted(f for f in source.repo_files if f.endswith(".safetensors"))
     singles = [f for f in singles if source.has(f)]
-    return singles, len(singles) > 1
+    return singles, len(singles) > 1, complete
 
 
 class SafetensorsExtractor:
@@ -127,7 +139,7 @@ class SafetensorsExtractor:
         return any(f.endswith(".safetensors") for f in source.repo_files)
 
     def extract(self, source: ExtractionSource) -> ExtractorResult:
-        files, sharded = _shard_files(source)
+        files, sharded, shards_complete = _shard_files(source)
 
         tensors: dict[str, dict] = {}
         metadata: dict = {}
@@ -145,12 +157,19 @@ class SafetensorsExtractor:
 
         # --- authoritative parameter count: sum of element counts ---
         total = 0
+        stored_bits = 0  # every tensor as stored, incl. qzeros/scales/g_idx
+        bits_known = True
         dtype_counts: dict[str, int] = {}
         # AWQ/GPTQ: count unpacked weights; qzeros/scales/g_idx are not parameters.
         packed, packed_ok = _packed_linear_shapes(tensors)
         for name, info in tensors.items():
             prefix, _, leaf = name.rpartition(".")
             prefix += "."
+            raw_dt = info.get("dtype", "unknown")
+            if raw_dt in _DTYPE_BITS:
+                stored_bits += _DTYPE_BITS[raw_dt] * prod(info.get("shape", []) or [0])
+            else:
+                bits_known = False
             if prefix in packed and leaf in _PACKED_AUX:
                 continue
             if prefix in packed and leaf == "qweight":
@@ -168,6 +187,18 @@ class SafetensorsExtractor:
             # Native dtype = the dtype covering the most parameters.
             dominant = max(dtype_counts.items(), key=lambda kv: kv[1])[0]
             claims.append(FieldClaim("parameters.dtype_native", dominant, "tensors", "high"))
+            # Measured whole-model bpw for AWQ/GPTQ: stored bits (scales/zeros
+            # included) over logical weights. Needs every shard present, every
+            # qweight resolved and every dtype known, else the ratio would be wrong — emit nothing.
+            if packed and packed_ok and bits_known and shards_complete and total:
+                claims.append(
+                    FieldClaim(
+                        "quantization.bits_per_weight_avg",
+                        round(stored_bits / total, 3),
+                        "tensors",
+                        "high",
+                    )
+                )
 
         # --- tied embeddings: authoritative from tensor presence ---
         names = set(tensors)

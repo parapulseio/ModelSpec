@@ -48,12 +48,14 @@ class AWQQuant(BaseModel):
     bits: int
     group_size: int
     zero_point: bool
+    bits_per_weight_avg: float | None   # measured whole-model bpw, from safetensors headers
 
 class GPTQQuant(BaseModel):
     format: Literal["gptq"]
     bits: int
     group_size: int
     desc_act: bool
+    bits_per_weight_avg: float | None   # measured whole-model bpw, from safetensors headers
 
 class BnBQuant(BaseModel):
     format: Literal["bitsandbytes"]
@@ -77,6 +79,7 @@ Downstream: `if spec.quantization and spec.quantization.format == "gguf": ...`, 
 ### Quantization pitfalls
 
 - **bits-per-weight is an average**: Q4_K_M is actually ~4.83 bpw, not 4.0. Sum it from the tensor list, not the nominal value. This matters for ParaPulse showing model sizes.
+- **Mixed precision**: `Q4_K_M` is not one type — llama.cpp keeps some tensors (e.g. `ffn_down`, `attn_v` in selected layers) at `Q6_K`. The per-role, per-layer type map is kept in passthrough as `tensor_type_layout` (not canonical); it is why different quantizers' `Q4_K_M` files differ and why measured bpw is ~4.83.
 - **imatrix quantization** (the IQ / I series) is higher quality but hard to tell apart at the file level. The `quantize.imatrix.{file,dataset,entries_count,chunks_count}` KV keys are deterministic evidence: any present → `has_imatrix=True` (`gguf`/`high`, and the keys are kept in passthrough — the dataset name is the useful bit). Older llama.cpp builds did not write them, so their absence is not evidence of no imatrix: it falls back to a `-imat-` filename heuristic (`low`) or stays `None`, never `False`.
 - **Mixed precision** (some Q4, some Q6) is common, so the `tensor_types` dict is necessary; you can't store only a single global bits.
 

@@ -145,6 +145,27 @@ def _ggml_type_name(t: int) -> str:
         return f"TYPE_{t}"
 
 
+_BLK_RE = re.compile(r"^blk\.(\d+)\.(.+)$")
+
+
+def _tensor_layout(tensors: list[tuple[str, list[int], int]]) -> dict[str, dict[str, list[int]]]:
+    """Per-role quant-type layout: ``{role: {type_name: [layer indices]}}``.
+
+    ``role`` is the tensor name with ``blk.{i}.`` stripped. Tensors outside a
+    block (embeddings, output) have no layer index, so their list is empty.
+    """
+    layout: dict[str, dict[str, list[int]]] = {}
+    for name, _dims, ggml_type in tensors:
+        m = _BLK_RE.match(name)
+        role, layers = (m.group(2), [int(m.group(1))]) if m else (name, [])
+        by_type = layout.setdefault(role, {}).setdefault(_ggml_type_name(ggml_type), [])
+        by_type.extend(layers)
+    for by_type in layout.values():
+        for layers in by_type.values():
+            layers.sort()
+    return layout
+
+
 def _filetype_name(value: Any) -> str | None:
     """Map a general.file_type enum value to a readable name (e.g. "Q4_K_M")."""
     try:
@@ -158,7 +179,9 @@ def _avg_bits_per_weight(type_counts: dict[int, int], total: int) -> float | Non
 
     GGML_QUANT_SIZES maps a tensor type to (block_elements, block_bytes); a
     block-quantized type like Q4_K_M is ~4.83 bpw, not 4.0. Returns total bits
-    divided by total elements.
+    divided by total elements. Returns None if any tensor has an unknown type
+    id: skipping it in the numerator while keeping it in the denominator would
+    under-report.
     """
     if not total:
         return None
@@ -166,8 +189,8 @@ def _avg_bits_per_weight(type_counts: dict[int, int], total: int) -> float | Non
     for ggml_type, count in type_counts.items():
         try:
             block_elems, block_bytes = GGML_QUANT_SIZES[GGMLQuantizationType(ggml_type)]
-        except (ValueError, KeyError):  # pragma: no cover - unknown type id
-            continue
+        except (ValueError, KeyError):
+            return None
         total_bits += (count / block_elems) * block_bytes * 8
     return round(total_bits / total, 3)
 
@@ -398,6 +421,9 @@ class GGUFExtractor:
             if key in fields
         }
         passthrough.update(imatrix_kv)
+        if dominant is not None and any(name not in _FULL_PRECISION for name in named_counts):
+            # Mixed-precision layout: why two "Q4_K_M" files can differ.
+            passthrough["tensor_type_layout"] = _tensor_layout(tensors)
         return ExtractorResult(
             claims=claims,
             passthrough=passthrough,
