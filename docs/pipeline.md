@@ -61,6 +61,8 @@ Runs multi-source checks before/after validation, writing results to `provenance
 
 ### Quantization guard (reshape)
 
+Each extractor's `passthrough` dict is collected into `provenance.passthrough[<extractor name>]` (e.g. `passthrough["safetensors"]["quantized_modules"]`).
+
 `quantization` is a discriminated union on `format`. If the merged claims contain `quantization.*` paths but no `quantization.format`, `reshape` does not build the subtree (so `spec.quantization` is `None` and validation succeeds) and stores the dropped values in `provenance.passthrough["quantization"]` and adds a `provenance.warnings` entry.
 
 ### Parameter double-path check

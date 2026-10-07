@@ -2,7 +2,7 @@
 
 - **Date**: 2026-10-07
 - **Branch**: `feature/assessing-ai-model-quantization-quality-3vxf0`
-- **Status**: proposed — D1 + D1a decided (canonical, whole-model scope), Phase A ready to start
+- **Status**: Phase A done (A1 #18, A4 #19, G #20, A2 #21, A3 #22, A5 #23); Phase B/C not started
 - **Input**: `quantization_weight_comparison.md` + `quant_weight_compare.py` (external notes on comparing an original model against GGUF / AWQ / GPTQ quantized variants with real weights, PPL, KL divergence, and imatrix)
 
 ## 1. Background

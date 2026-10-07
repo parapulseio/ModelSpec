@@ -52,7 +52,6 @@ ModelSpec
 - `repo_id: str`
 - `source_format: Literal["hf", "gguf", "adapter", "raw"]`
 - `file_layout: str | None` — single / sharded
-- `quantization.bits_per_weight_avg: float | None` — on `GGUFQuant`, `AWQQuant` and `GPTQQuant`: **measured whole-model** bits-per-weight (Σ stored bits of all tensors, incl. `qzeros`/`scales`/`g_idx` and unquantized FP16 embeddings / `lm_head`, ÷ logical weight count), not the nominal `bits`. `ModelSpec.bits_per_weight` prefers it on every branch and falls back to nominal `bits` for AWQ/GPTQ when it is `None` (e.g. incomplete shards or underivable shapes). See [extractors.md](extractors.md).
 - `lineage: Lineage | None` — the **unified source relationship** (the base_model chain). Quantization, merge, and adapter all have a base_model; keep it here, not inside each sub-structure.
 
 ### Architecture
@@ -98,6 +97,10 @@ ModelSpec
 - `attribution_required: bool | None`
 - `confidence_tier: Literal["fingerprint", "keyword", "llm"]`
 
+### Quantization (discriminated union on `format`, see [quantization-and-merge.md](quantization-and-merge.md))
+- `bits_per_weight_avg: float | None` — on `GGUFQuant`, `AWQQuant` and `GPTQQuant`: **measured whole-model** bits-per-weight (Σ stored bits of all tensors, incl. `qzeros`/`scales`/`g_idx` and unquantized FP16 embeddings / `lm_head`, ÷ logical weight count), not the nominal `bits`. `ModelSpec.bits_per_weight` prefers it on every branch and falls back to nominal `bits` for AWQ/GPTQ when it is `None` (e.g. incomplete shards or underivable shapes). See [extractors.md](extractors.md).
+- `has_imatrix: bool | None` — GGUF only. `True` from the `quantize.imatrix.*` KV (`gguf`/`high`) or, failing that, a `-imat-` filename heuristic (`low`); never `False` (older llama.cpp did not write the KV). Static quantization metadata that is not canonical lives in `provenance.passthrough`: GGUF `quantize.imatrix.*` keys + `tensor_type_layout`, safetensors `quantized_modules` (AWQ/GPTQ).
+
 ### Provenance (the core of losslessness)
 - `per_field: dict[str, FieldProvenance]` — each field's `{source, confidence}`
 - `conflicts: list[Conflict]` — multi-source conflicts archived for human review
@@ -105,7 +108,7 @@ ModelSpec
 - `not_applicable: list[str]` — dotted paths the model **legitimately lacks** (e.g. `attention.num_kv_heads` under MLA), distinct from merely missing/`None`. Extractors that know a field doesn't apply emit it (see `ExtractorResult.not_applicable`).
 - `raw_config_json: dict | None` — the full original config, hash-archived, never lost
 - `raw_gguf_kv: dict | None`
-- `passthrough: dict` — recognized-but-not-canonical values kept verbatim; e.g. `quantization.*` claims dropped for lack of `quantization.format` land under `passthrough["quantization"]` (with a warning)
+- `passthrough: dict` — recognized-but-not-canonical values kept verbatim; namespaced by extractor name (`passthrough["safetensors"]["quantized_modules"]`); also `quantization.*` claims dropped for lack of `quantization.format` land under `passthrough["quantization"]` (with a warning)
 - `unknown_fields: list[str]` — fields present in raw but covered by neither canonical nor passthrough (the auto feedback loop)
 
 > **Self-documenting schema**: every field carries a Pydantic `Field(description=...)`, so `model_json_schema()` export includes descriptions (UI tooltips, generated forms). `modelspec.schema.export_json_schema()` (what `modelspec schema` / `modelspec verify` actually use) wraps this with `$schema` / `$id` / `$comment` so a schema file handed to a third party is self-identifying — see [cli.md](cli.md#schema--export-the-json-schema).

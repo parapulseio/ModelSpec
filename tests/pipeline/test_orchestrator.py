@@ -257,3 +257,22 @@ def test_packed_awq_param_count_passes_double_path_check(tmp_path: Path):
     spec = extract(str(tmp_path), offline=True)
     assert spec.parameters.total == 32 * 16 + 4 * 256 + 3 * 512
     assert not any("parameter count mismatch" in w for w in spec.provenance.warnings)
+
+
+def test_quantized_modules_exposed_in_provenance_passthrough(tmp_path: Path):
+    write_config(
+        tmp_path / "config.json",
+        {"model_type": "llama", "architectures": ["LlamaForCausalLM"]},
+    )
+    write_safetensors_header(
+        tmp_path / "model.safetensors",
+        {
+            "model.embed_tokens.weight": {"dtype": "F16", "shape": [10, 256]},
+            "model.layers.0.mlp.down_proj.qweight": {"dtype": "I32", "shape": [256, 16]},
+            "model.layers.0.mlp.down_proj.scales": {"dtype": "F16", "shape": [2, 128]},
+        },
+    )
+    spec = extract(str(tmp_path), offline=True)
+    qm = spec.provenance.passthrough["safetensors"]["quantized_modules"]
+    assert qm["quantized"] == ["model.layers.0.mlp.down_proj"]
+    assert qm["unquantized"] == ["model.embed_tokens.weight"]
