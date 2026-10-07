@@ -158,3 +158,30 @@ def test_no_imatrix_evidence_emits_no_claim(tmp_path: Path):
     res = _imatrix_claims(tmp_path, "model-Q4_K_M.gguf", {})
     assert all(c.field_path != "quantization.has_imatrix" for c in res.claims)
     assert not any(k.startswith("quantize.imatrix") for k in res.passthrough)
+
+
+def test_mixed_precision_layout_in_passthrough(tmp_path: Path):
+    types = {0: "Q6_K", 1: "Q4_K", 2: "Q4_K", 3: "Q6_K"}
+    tensors = {f"blk.{i}.ffn_down.weight": ([4, 256], t) for i, t in types.items()}
+    tensors["token_embd.weight"] = ([4, 256], "Q4_K")
+    write_gguf(
+        tmp_path / "model-Q4_K_M.gguf",
+        kv={"general.architecture": "llama", "general.file_type": 15},
+        tensors=tensors,
+    )
+    src = ExtractionSource(root=tmp_path, repo_files=["model-Q4_K_M.gguf"])
+    res = GGUFExtractor().extract(src)
+    layout = res.passthrough["tensor_type_layout"]
+    assert layout["ffn_down.weight"] == {"Q6_K": [0, 3], "Q4_K": [1, 2]}
+    assert layout["token_embd.weight"] == {"Q4_K": []}
+    assert all(c.field_path != "quantization.tensor_type_layout" for c in res.claims)
+
+
+def test_unquantized_gguf_has_no_layout(tmp_path: Path):
+    write_gguf(
+        tmp_path / "model-f16.gguf",
+        kv={"general.architecture": "llama", "general.file_type": 1},
+        tensors={"token_embd.weight": ([8, 8], "F16")},
+    )
+    src = ExtractionSource(root=tmp_path, repo_files=["model-f16.gguf"])
+    assert "tensor_type_layout" not in GGUFExtractor().extract(src).passthrough
