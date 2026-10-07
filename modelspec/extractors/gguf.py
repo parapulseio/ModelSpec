@@ -158,7 +158,9 @@ def _avg_bits_per_weight(type_counts: dict[int, int], total: int) -> float | Non
 
     GGML_QUANT_SIZES maps a tensor type to (block_elements, block_bytes); a
     block-quantized type like Q4_K_M is ~4.83 bpw, not 4.0. Returns total bits
-    divided by total elements.
+    divided by total elements. Returns None if any tensor has an unknown type
+    id: skipping it in the numerator while keeping it in the denominator would
+    under-report.
     """
     if not total:
         return None
@@ -166,8 +168,8 @@ def _avg_bits_per_weight(type_counts: dict[int, int], total: int) -> float | Non
     for ggml_type, count in type_counts.items():
         try:
             block_elems, block_bytes = GGML_QUANT_SIZES[GGMLQuantizationType(ggml_type)]
-        except (ValueError, KeyError):  # pragma: no cover - unknown type id
-            continue
+        except (ValueError, KeyError):
+            return None
         total_bits += (count / block_elems) * block_bytes * 8
     return round(total_bits / total, 3)
 

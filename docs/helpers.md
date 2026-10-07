@@ -26,7 +26,7 @@ All are pure projections of already-validated state — they never raise, never 
 | `spec.is_multimodal()` | `bool` | has a vision/audio component (a VLM) |
 | `spec.modality` | `str` | coarse kind: `multimodal` / `audio` / `vision` / `encoder` / `seq2seq` / `decoder-only` / `unknown` |
 | `spec.quant_format` | `str \| None` | the union discriminator: `gguf` / `awq` / `gptq` |
-| `spec.bits_per_weight` | `float \| None` | GGUF measured avg, else AWQ/GPTQ nominal bits |
+| `spec.bits_per_weight` | `float \| None` | measured `bits_per_weight_avg` (GGUF / AWQ / GPTQ), else AWQ/GPTQ nominal bits |
 | `spec.effective_context` | `int \| None` | `effective` → `declared` → `trained` fallback |
 | `spec.source_of(path)` | `SourceLabel \| None` | winning source for a dotted field path |
 | `spec.confidence_of(path)` | `Confidence \| None` | confidence of the winning value |

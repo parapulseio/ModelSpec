@@ -31,6 +31,14 @@ def test_quant_helpers_awq_bits_coerced_to_float():
     assert spec.bits_per_weight == 4.0
 
 
+def test_quant_helpers_prefers_measured_bpw_on_awq_gptq():
+    for fmt in ("awq", "gptq"):
+        spec = ModelSpec.model_validate(
+            {"quantization": {"format": fmt, "bits": 4, "bits_per_weight_avg": 5.7}}
+        )
+        assert spec.bits_per_weight == 5.7
+
+
 def test_modality_helpers():
     llm = ModelSpec.model_validate({"architecture": {"tags": ["decoder-only", "gqa"]}})
     assert llm.is_decoder_only() and not llm.is_multimodal()

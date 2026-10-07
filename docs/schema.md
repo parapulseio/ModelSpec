@@ -52,6 +52,7 @@ ModelSpec
 - `repo_id: str`
 - `source_format: Literal["hf", "gguf", "adapter", "raw"]`
 - `file_layout: str | None` — single / sharded
+- `quantization.bits_per_weight_avg: float | None` — on `GGUFQuant`, `AWQQuant` and `GPTQQuant`: **measured whole-model** bits-per-weight (Σ stored bits of all tensors, incl. `qzeros`/`scales`/`g_idx` and unquantized FP16 embeddings / `lm_head`, ÷ logical weight count), not the nominal `bits`. `ModelSpec.bits_per_weight` prefers it on every branch and falls back to nominal `bits` for AWQ/GPTQ when it is `None` (e.g. incomplete shards or underivable shapes). See [extractors.md](extractors.md).
 - `lineage: Lineage | None` — the **unified source relationship** (the base_model chain). Quantization, merge, and adapter all have a base_model; keep it here, not inside each sub-structure.
 
 ### Architecture
