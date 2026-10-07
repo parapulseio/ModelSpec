@@ -31,6 +31,14 @@ except ImportError:  # pragma: no cover - exercised only when gguf is absent
 # Tensor types that are NOT quantization (full / half precision).
 _FULL_PRECISION = {"F32", "F16", "BF16", "F64"}
 
+# llama.cpp writes these when quantizing with an importance matrix.
+_IMATRIX_KEYS = (
+    "quantize.imatrix.file",
+    "quantize.imatrix.dataset",
+    "quantize.imatrix.entries_count",
+    "quantize.imatrix.chunks_count",
+)
+
 # GGUF value_type -> (struct format, byte size) for fixed-width scalars.
 _GGUF_SCALAR = {
     0: ("<B", 1),  # uint8
@@ -356,6 +364,8 @@ class GGUFExtractor:
             dominant = max(named_counts.items(), key=lambda kv: kv[1])[0]
             claims.append(FieldClaim("parameters.dtype_native", dominant, "tensors", "high"))
 
+        imatrix_kv = {k: fields[k] for k in _IMATRIX_KEYS if k in fields}
+
         # --- quantization (GGUF branch of the discriminated union) ---
         if dominant is not None and any(name not in _FULL_PRECISION for name in named_counts):
             claims.append(FieldClaim("quantization.format", "gguf", "gguf", "high"))
@@ -369,9 +379,12 @@ class GGUFExtractor:
             claims.append(
                 FieldClaim("quantization.tensor_types", named_counts, "tensors", "high")
             )
-            # imatrix can't be told apart at the byte level; filename is the only
-            # cheap cue. Leave None when absent rather than asserting False.
-            if "imat" in path.name.lower():
+            # The quantize.imatrix.* KV is deterministic evidence; older llama.cpp
+            # builds never wrote it, so its absence proves nothing (never assert
+            # False) and the filename is only a low-confidence fallback.
+            if imatrix_kv:
+                claims.append(FieldClaim("quantization.has_imatrix", True, "gguf", "high"))
+            elif "imat" in path.name.lower():
                 claims.append(FieldClaim("quantization.has_imatrix", True, "heuristic", "low"))
 
         file_layout = "sharded" if sharded else "single"
@@ -384,6 +397,7 @@ class GGUFExtractor:
             for key in ("general.file_type", "general.quantization_version", "general.name")
             if key in fields
         }
+        passthrough.update(imatrix_kv)
         return ExtractorResult(
             claims=claims,
             passthrough=passthrough,
