@@ -52,12 +52,14 @@ def reshape(
     raw_gguf: dict | None,
     unknown_fields: list[str],
     not_applicable: list[str],
+    extractor_passthrough: dict[str, dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Turn the flat merged fields into the nested ModelSpec-shaped dict."""
     tree: dict[str, Any] = {}
     per_field: dict[str, dict[str, str]] = {}
     warnings: list[str] = []
-    passthrough: dict[str, Any] = {}
+    # Per-extractor passthrough, namespaced by extractor name to avoid collisions.
+    passthrough: dict[str, Any] = dict(extractor_passthrough or {})
 
     # quantization is a discriminated union keyed on ``format``: sub-field claims
     # with no ``format`` claim (unknown quant_method, or a source that only knows
@@ -108,11 +110,14 @@ def extract_from_source(source: ExtractionSource) -> ModelSpec:
     raw_gguf: dict | None = None
     unknown_fields: list[str] = []
     not_applicable: list[str] = []
+    extractor_passthrough: dict[str, dict[str, Any]] = {}
     for ext in extractors:
         result = ext.extract(source)
         all_claims.extend(result.claims)
         unknown_fields.extend(result.unknown_fields)
         not_applicable.extend(result.not_applicable)
+        if result.passthrough:
+            extractor_passthrough[ext.name] = result.passthrough
         if ext.name == "config_json":
             raw_config = result.raw
         elif ext.name == "gguf":
@@ -127,6 +132,7 @@ def extract_from_source(source: ExtractionSource) -> ModelSpec:
         raw_gguf=raw_gguf,
         unknown_fields=unknown_fields,
         not_applicable=not_applicable,
+        extractor_passthrough=extractor_passthrough,
     )
     # Pydantic's entry-point validation — the first time the schema is touched.
     spec = ModelSpec.model_validate(tree)

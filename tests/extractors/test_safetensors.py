@@ -192,3 +192,46 @@ def test_packed_tensors_aggregate_across_shards(tmp_path: Path):
         ],
     )
     assert _claims(src)[0]["parameters.total"] == 2 * 256 * 128
+
+
+def test_quantized_modules_passthrough(tmp_path: Path):
+    write_safetensors_header(
+        tmp_path / "model.safetensors",
+        {
+            "model.embed_tokens.weight": {"dtype": "F16", "shape": [10, 256]},
+            "model.layers.0.mlp.down_proj.qweight": {"dtype": "I32", "shape": [256, 16]},
+            "model.layers.0.mlp.down_proj.qzeros": {"dtype": "I32", "shape": [2, 16]},
+            "model.layers.0.mlp.down_proj.scales": {"dtype": "F16", "shape": [2, 128]},
+            "model.layers.0.input_layernorm.weight": {"dtype": "F16", "shape": [256]},
+            "lm_head.weight": {"dtype": "F16", "shape": [10, 256]},
+        },
+    )
+    src = ExtractionSource(root=tmp_path, repo_files=["model.safetensors"])
+    result = SafetensorsExtractor().extract(src)
+    assert result.passthrough["quantized_modules"] == {
+        "quantized": ["model.layers.0.mlp.down_proj"],
+        "unquantized": ["lm_head.weight", "model.embed_tokens.weight"],
+    }
+
+
+def test_no_quantized_modules_passthrough_for_plain_checkpoint(tmp_path: Path):
+    write_safetensors_header(
+        tmp_path / "model.safetensors", {"w.weight": {"dtype": "F16", "shape": [4, 4]}}
+    )
+    src = ExtractionSource(root=tmp_path, repo_files=["model.safetensors"])
+    assert "quantized_modules" not in SafetensorsExtractor().extract(src).passthrough
+
+
+def test_gpt2_style_embeddings_reported_unquantized(tmp_path: Path):
+    write_safetensors_header(
+        tmp_path / "model.safetensors",
+        {
+            "transformer.wte.weight": {"dtype": "F16", "shape": [10, 256]},
+            "transformer.wpe.weight": {"dtype": "F16", "shape": [8, 256]},
+            "transformer.h.0.mlp.c_proj.qweight": {"dtype": "I32", "shape": [256, 16]},
+            "transformer.h.0.mlp.c_proj.scales": {"dtype": "F16", "shape": [2, 128]},
+        },
+    )
+    src = ExtractionSource(root=tmp_path, repo_files=["model.safetensors"])
+    qm = SafetensorsExtractor().extract(src).passthrough["quantized_modules"]
+    assert qm["unquantized"] == ["transformer.wpe.weight", "transformer.wte.weight"]

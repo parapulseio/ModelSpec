@@ -80,6 +80,32 @@ def _packed_linear_shapes(tensors: dict[str, dict]) -> tuple[dict[str, tuple[int
     return result, all_resolved
 
 
+_EMBED_MARKERS = ("lm_head", "embed", ".wte.", ".wpe.", "wte.weight", "wpe.weight")
+
+
+def _is_embedding_or_head(name: str) -> bool:
+    # ``embed`` covers embed_tokens / word_embeddings / embed_positions; GPT-2
+    # style uses wte / wpe.
+    return any(m in name for m in _EMBED_MARKERS)
+
+
+def _quantized_modules(tensors: dict[str, dict]) -> dict[str, list[str]]:
+    """List AWQ/GPTQ-quantized module prefixes and the notable unquantized ones.
+
+    A module is quantized when it has a ``qweight`` tensor. Notable unquantized
+    modules are the ones that stay in the native dtype and dominate whole-model
+    bits-per-weight: ``lm_head`` and the embeddings.
+    """
+    quantized = sorted(n[: -len(".qweight")] for n in tensors if n.endswith(".qweight"))
+    qset = {q + "." for q in quantized}
+    unquantized = sorted(
+        n
+        for n in tensors
+        if n.rpartition(".")[0] + "." not in qset and _is_embedding_or_head(n)
+    )
+    return {"quantized": quantized, "unquantized": unquantized}
+
+
 def _shard_files(source: ExtractionSource) -> tuple[list[str], bool]:
     """Return the list of safetensors files to read and whether it is sharded."""
     if source.has(_INDEX):
@@ -162,11 +188,15 @@ class SafetensorsExtractor:
         file_layout = "sharded" if sharded else "single"
         claims.append(FieldClaim("identity.file_layout", file_layout, "tensors", "high"))
 
-        # passthrough: the __metadata__ dict; raw: the tensor name list only
-        # (offsets are dropped — too large to keep).
+        # passthrough: the __metadata__ dict and, for AWQ/GPTQ, which modules are
+        # quantized; raw: the tensor name list only (offsets are dropped — too
+        # large to keep).
+        passthrough: dict = {"__metadata__": metadata} if metadata else {}
+        if any(n.endswith(".qweight") for n in tensors):
+            passthrough["quantized_modules"] = _quantized_modules(tensors)
         return ExtractorResult(
             claims=claims,
-            passthrough={"__metadata__": metadata} if metadata else {},
+            passthrough=passthrough,
             raw={"tensor_names": sorted(names)} if names else None,
             unknown_fields=[],
         )

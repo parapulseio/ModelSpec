@@ -101,6 +101,7 @@ Outputs:
 - `parameters.dtype_native` — for packed layers, the `scales` dtype (the dequantized dtype), not `I32`
 - `architecture.tied_embeddings` — whether `lm_head.weight` exists
 - the tensor name list — the last-resort fallback for architecture inference
+- `quantized_modules` (passthrough, AWQ/GPTQ only) — `{"quantized": [prefixes that have a qweight], "unquantized": [lm_head / embedding tensors left in the native dtype]}`; not canonical
 - the whole `__metadata__` dict into passthrough (may contain SAI ModelSpec fields, training hyperparams)
 
 > **Sharded models must read `model.safetensors.index.json` first** and aggregate every shard header, otherwise the parameter count comes out half.
