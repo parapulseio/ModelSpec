@@ -56,7 +56,29 @@ def reshape(
     """Turn the flat merged fields into the nested ModelSpec-shaped dict."""
     tree: dict[str, Any] = {}
     per_field: dict[str, dict[str, str]] = {}
+    warnings: list[str] = []
+    passthrough: dict[str, Any] = {}
+
+    # quantization is a discriminated union keyed on ``format``: sub-field claims
+    # with no ``format`` claim (unknown quant_method, or a source that only knows
+    # the sub-field) would fail validation. Drop the subtree and warn instead.
+    orphaned = (
+        sorted(p for p in merged.fields if p.startswith("quantization."))
+        if "quantization.format" not in merged.fields
+        else []
+    )
+    if orphaned:
+        dropped = {p: merged.fields[p].value for p in orphaned}
+        passthrough["quantization"] = {
+            p.removeprefix("quantization."): v for p, v in dropped.items()
+        }
+        warnings.append(
+            "quantization.format is unknown; dropped quantization claims "
+            f"{dropped!r} (no discriminator to build the union)"
+        )
     for path, mf in merged.fields.items():
+        if path in orphaned:
+            continue
         _set_nested(tree, path, mf.value)
         per_field[path] = {"source": mf.source, "confidence": mf.confidence}
 
@@ -67,7 +89,8 @@ def reshape(
     tree["provenance"] = {
         "per_field": per_field,
         "conflicts": merged.conflicts,
-        "warnings": [],
+        "warnings": warnings,
+        "passthrough": passthrough,
         "not_applicable": sorted(set(not_applicable)),
         "raw_config_json": raw_config,
         "raw_gguf_kv": raw_gguf,
