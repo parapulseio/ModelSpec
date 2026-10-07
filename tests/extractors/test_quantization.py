@@ -118,3 +118,43 @@ def test_unquantized_gguf_has_no_quantization(tmp_path: Path):
     src = ExtractionSource(root=tmp_path, repo_files=["model-f16.gguf"])
     claims = {c.field_path: c.value for c in GGUFExtractor().extract(src).claims}
     assert "quantization.format" not in claims
+
+
+def _imatrix_claims(tmp_path: Path, filename: str, extra_kv: dict):
+    write_gguf(
+        tmp_path / filename,
+        kv={"general.architecture": "llama", "general.file_type": 15, **extra_kv},
+        tensors={"blk.0.attn_q.weight": ([4, 256], "Q4_K")},
+    )
+    src = ExtractionSource(root=tmp_path, repo_files=[filename])
+    return GGUFExtractor().extract(src)
+
+
+def test_imatrix_kv_gives_high_confidence(tmp_path: Path):
+    res = _imatrix_claims(
+        tmp_path,
+        "model-Q4_K_M.gguf",
+        {"quantize.imatrix.file": "imatrix.dat", "quantize.imatrix.dataset": "wiki.train.raw"},
+    )
+    claim = next(c for c in res.claims if c.field_path == "quantization.has_imatrix")
+    assert (claim.value, claim.source, claim.confidence) == (True, "gguf", "high")
+    assert res.passthrough["quantize.imatrix.dataset"] == "wiki.train.raw"
+    assert res.passthrough["quantize.imatrix.file"] == "imatrix.dat"
+
+
+def test_imatrix_kv_beats_filename_heuristic(tmp_path: Path):
+    res = _imatrix_claims(tmp_path, "model-imat-Q4_K_M.gguf", {"quantize.imatrix.entries_count": 3})
+    claims = [c for c in res.claims if c.field_path == "quantization.has_imatrix"]
+    assert len(claims) == 1 and claims[0].confidence == "high"
+
+
+def test_imatrix_filename_only_is_low_confidence(tmp_path: Path):
+    res = _imatrix_claims(tmp_path, "model-imat-Q4_K_M.gguf", {})
+    claim = next(c for c in res.claims if c.field_path == "quantization.has_imatrix")
+    assert (claim.value, claim.source, claim.confidence) == (True, "heuristic", "low")
+
+
+def test_no_imatrix_evidence_emits_no_claim(tmp_path: Path):
+    res = _imatrix_claims(tmp_path, "model-Q4_K_M.gguf", {})
+    assert all(c.field_path != "quantization.has_imatrix" for c in res.claims)
+    assert not any(k.startswith("quantize.imatrix") for k in res.passthrough)

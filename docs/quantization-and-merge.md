@@ -77,7 +77,7 @@ Downstream: `if spec.quantization and spec.quantization.format == "gguf": ...`, 
 ### Quantization pitfalls
 
 - **bits-per-weight is an average**: Q4_K_M is actually ~4.83 bpw, not 4.0. Sum it from the tensor list, not the nominal value. This matters for ParaPulse showing model sizes.
-- **imatrix quantization** (the IQ / I series) is higher quality but hard to tell apart at the file level. Heuristics: `general.quantization_version` / a `-imat-` filename / an imatrix field in the GGUF KV — none are fully reliable, so `has_imatrix` allows `None`.
+- **imatrix quantization** (the IQ / I series) is higher quality but hard to tell apart at the file level. The `quantize.imatrix.{file,dataset,entries_count,chunks_count}` KV keys are deterministic evidence: any present → `has_imatrix=True` (`gguf`/`high`, and the keys are kept in passthrough — the dataset name is the useful bit). Older llama.cpp builds did not write them, so their absence is not evidence of no imatrix: it falls back to a `-imat-` filename heuristic (`low`) or stays `None`, never `False`.
 - **Mixed precision** (some Q4, some Q6) is common, so the `tensor_types` dict is necessary; you can't store only a single global bits.
 
 ## Merge modeling
