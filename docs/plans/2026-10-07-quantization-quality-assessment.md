@@ -2,7 +2,7 @@
 
 - **Date**: 2026-10-07
 - **Branch**: `feature/assessing-ai-model-quantization-quality-3vxf0`
-- **Status**: Phase A done (A1 #18, A4 #19, G #20, A2 #21, A3 #22, A5 #23); Phase B/C not started
+- **Status**: Phase A done (A1 #18, A4 #19, G #20, A2 #21, A3 #22, A5 #23); Phase B/C moved to [parapulseio/QuantAssessment](https://github.com/parapulseio/QuantAssessment) (see D2)
 - **Input**: `quantization_weight_comparison.md` + `quant_weight_compare.py` (external notes on comparing an original model against GGUF / AWQ / GPTQ quantized variants with real weights, PPL, KL divergence, and imatrix)
 
 ## 1. Background
@@ -89,6 +89,8 @@ All changes stay inside extractors and follow the three-layer rule (new fields g
 
 ## 4. Phase B — weight reconstruction error (opt-in module, prototype first)
 
+> **Moved (D2, 2026-10-07)**: Phase B and Phase C are developed in a separate repo, [parapulseio/QuantAssessment](https://github.com/parapulseio/QuantAssessment), not as a `modelspec/quality/` sub-package. The authoritative plan is [`docs/plans/2026-10-07-phase-b-c-development-plan.md`](https://github.com/parapulseio/QuantAssessment/blob/main/docs/plans/2026-10-07-phase-b-c-development-plan.md) in that repo. The text below is the original design, kept for history; where it says `modelspec/quality/`, `modelspec assess-quant` or `modelspec ingest-eval`, read QuantAssessment's `quantassess` package and CLI instead.
+
 ### Positioning
 
 - New sub-package `modelspec/quality/` + CLI subcommand (working name `modelspec assess-quant`). **Never** invoked by `extract`.
@@ -129,6 +131,8 @@ All changes stay inside extractors and follow the three-layer rule (new fields g
 
 ## 5. Phase C — PPL / KLD (ingest only)
 
+> **Moved (D2)**: see the note at the top of section 4.
+
 - Do **not** run models. Provide `modelspec ingest-eval <file>` that parses:
   - `llama-perplexity` stdout (both plain PPL and `--kl-divergence` output: Mean PPL(Q)/(base), Mean ln ratio, Mean / Median / 99% / 99.9% / Max KLD, Mean Δp, RMS Δp, Same top p);
   - a documented JSON format for HF-side evaluations (AWQ/GPTQ via transformers).
@@ -168,15 +172,23 @@ Each step-2 task starts as soon as its own prerequisites land; there is no globa
 
 ### Later phases
 
-1. Phase B prototype on its own branch; decision gate.
-2. Phase C only if Phase B is kept, or if there is a concrete consumer asking for PPL/KLD display.
+Phase B and Phase C are scheduled in [parapulseio/QuantAssessment](https://github.com/parapulseio/QuantAssessment) (see D2). ModelSpec only owes the upstream prerequisites in section 9.
 
 ## 7. Decisions
 
 - **D1 (2026-10-07)**: AWQ/GPTQ measured bpw is a canonical field (`bits_per_weight_avg`). See A3.
 - **D1a (2026-10-07)**: bpw scope is **whole model** (all tensors, incl. unquantized FP16 embeddings / `lm_head`), consistent with GGUF. Scope does not affect extraction time: both scopes read the same already-fetched headers.
 
+- **D2 (2026-10-07)**: Phase B/C reports (`QuantAssessment`, `EvalRecord`) and the code that produces them live in [parapulseio/QuantAssessment](https://github.com/parapulseio/QuantAssessment), not in ModelSpec. Report models, storage (stdout / `-o`, sidecar in a `--download-only` directory, ParaPulse for persistence) and methodology are defined in that repo's README. ModelSpec stays metadata-only; the static quantization metadata from Phase A stays here because it is a property of the file.
+
 ## 8. Open questions
 
-- Where should Phase B/C reports live — alongside `analytics/` outputs, or as a sidecar file next to the spec JSON?
-- Is a per-arch HF↔GGUF name mapping worth maintaining, or should Phase B start with Llama-family only?
+- ~~Where should Phase B/C reports live?~~ Resolved by D2.
+- ~~Per-arch HF↔GGUF name mapping, or Llama-family only?~~ Moved to QuantAssessment; tracked in its Phase B/C plan.
+
+## 9. ModelSpec-side prerequisites for QuantAssessment
+
+QuantAssessment depends on ModelSpec (git-tag dependency; ModelSpec is not on PyPI) for extraction, lineage-based reference discovery, architecture info and GGUF header parsing. Two small changes are needed here:
+
+- **U1. GGUF tensor data offsets.** `parse_gguf_header` (`modelspec/extractors/gguf.py`) reads each tensor's data offset and discards it. Add a public, backward-compatible way to get, per tensor, `(name, dims, ggml_type, offset)` plus the start of the data section (end of tensor infos, aligned to `general.alignment`, default 32). Do not change the existing return shape that the extractor and tests rely on. Still no `GGUFReader`.
+- **U2. Release.** Tag a release (e.g. `v0.2.0`) that contains Phase A and U1. The latest tag, `v0.1.1`, predates Phase A, so QuantAssessment cannot pin anything that has `bits_per_weight_avg` on AWQ/GPTQ or the quantized-module lists.
