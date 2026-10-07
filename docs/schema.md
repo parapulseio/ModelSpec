@@ -52,7 +52,6 @@ ModelSpec
 - `repo_id: str`
 - `source_format: Literal["hf", "gguf", "adapter", "raw"]`
 - `file_layout: str | None` — single / sharded
-- `quantization.bits_per_weight_avg: float | None` — on `GGUFQuant`, `AWQQuant` and `GPTQQuant`: **measured whole-model** bits-per-weight (Σ stored bits of all tensors, incl. `qzeros`/`scales`/`g_idx` and unquantized FP16 embeddings / `lm_head`, ÷ logical weight count), not the nominal `bits`. `ModelSpec.bits_per_weight` prefers it on every branch and falls back to nominal `bits` for AWQ/GPTQ when it is `None` (e.g. incomplete shards or underivable shapes). See [extractors.md](extractors.md).
 - `lineage: Lineage | None` — the **unified source relationship** (the base_model chain). Quantization, merge, and adapter all have a base_model; keep it here, not inside each sub-structure.
 
 ### Architecture
@@ -97,6 +96,10 @@ ModelSpec
 - `redistribution: bool | None`
 - `attribution_required: bool | None`
 - `confidence_tier: Literal["fingerprint", "keyword", "llm"]`
+
+### Quantization (discriminated union on `format`, see [quantization-and-merge.md](quantization-and-merge.md))
+- `bits_per_weight_avg: float | None` — on `GGUFQuant`, `AWQQuant` and `GPTQQuant`: **measured whole-model** bits-per-weight (Σ stored bits of all tensors, incl. `qzeros`/`scales`/`g_idx` and unquantized FP16 embeddings / `lm_head`, ÷ logical weight count), not the nominal `bits`. `ModelSpec.bits_per_weight` prefers it on every branch and falls back to nominal `bits` for AWQ/GPTQ when it is `None` (e.g. incomplete shards or underivable shapes). See [extractors.md](extractors.md).
+- `has_imatrix: bool | None` — GGUF only. `True` from the `quantize.imatrix.*` KV (`gguf`/`high`) or, failing that, a `-imat-` filename heuristic (`low`); never `False` (older llama.cpp did not write the KV). Static quantization metadata that is not canonical lives in `provenance.passthrough`: GGUF `quantize.imatrix.*` keys + `tensor_type_layout`, safetensors `quantized_modules` (AWQ/GPTQ).
 
 ### Provenance (the core of losslessness)
 - `per_field: dict[str, FieldProvenance]` — each field's `{source, confidence}`
